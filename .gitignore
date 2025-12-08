@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Project specific 
+datasets/
+data/
+testing/
+lora_adapter/
+lora_model*
+base_model*
+results/
+backup/
+jupyter_nb/
+TODO.md

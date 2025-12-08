@@ -1,0 +1,19 @@
+[project]
+name = "codelora"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "datasets>=4.3.0",
+    "evaluate>=0.4.6",
+    "matplotlib>=3.10.7",
+    "numpy>=2.3.4",
+    "peft>=0.17.1",
+    "pytest>=9.0.2",
+    "scikit-learn>=1.7.2",
+    "torch>=2.9.0",
+    "transformers>=4.57.1",
+    "tree-sitter>=0.25.2",
+    "tree-sitter-language-pack>=0.11.0",
+]

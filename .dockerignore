@@ -1,0 +1,48 @@
+# Exclude Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Exclude virtual environment and environment files
+.env
+.venv/
+env/
+venv/
+
+# Exclude version control files and folders
+.git/
+.gitignore
+
+# Exclude test folders
+tests/
+
+# Exclude docs folder as not needed inside container
+docs/
+
+# Exclude Python packaging/build artifacts
+*.egg-info/
+build/
+dist/
+
+# Editor/IDE configs
+.vscode/
+.idea/
+
+# Exclude Dockerfile and dockerignore file itself
+Dockerfile
+.dockerignore
+
+# Exclude project specific folders and files
+backup/
+
+data/
+datasets/
+lora_adapter/
+lora_model/
+lora_model_gguf/
+base_model/
+jupyter_nb/
+results/
+testing/
+tmp_trainer/
+TODO.md

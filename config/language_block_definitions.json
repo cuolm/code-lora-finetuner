@@ -1,0 +1,190 @@
+{
+  "c": {
+    "block_types": [
+      "function_definition",
+      "struct_specifier",
+      "union_specifier",
+      "enum_specifier"
+    ],
+    "subblock_types": [
+      "compound_statement",
+      "parameter_list",
+      "declaration",
+      "expression_statement",
+      "if_statement",
+      "while_statement",
+      "for_statement",
+      "switch_statement",
+      "case_statement",
+      "return_statement",
+      "field_declaration_list",
+      "field_declaration",
+      "struct_specifier",
+      "enumerator_list",
+      "enumerator"
+    ]
+  },
+  "python": {
+    "block_types": [
+      "function_definition",
+      "class_definition",
+      "decorated_definition",
+      "async_function"
+    ],
+    "subblock_types": [
+      "block",
+      "parameters",
+      "assignment",
+      "expression_statement",
+      "if_statement",
+      "while_statement",
+      "for_statement",
+      "match_statement",
+      "case_clause",
+      "return_statement",
+      "decorated_definition",
+      "try_statement",
+      "except_clause",
+      "finally_clause",
+      "with_statement",
+      "lambda",
+      "yield"
+    ]
+  },
+  "cpp": {
+    "block_types": [
+      "function_definition",
+      "class_specifier",
+      "struct_specifier",
+      "union_specifier",
+      "enum_specifier",
+      "template_declaration",
+      "namespace_definition"
+    ],
+    "subblock_types": [
+      "compound_statement",
+      "parameter_list",
+      "declaration",
+      "expression_statement",
+      "if_statement",
+      "while_statement",
+      "for_statement",
+      "switch_statement",
+      "case_statement",
+      "return_statement",
+      "field_declaration_list",
+      "field_declaration",
+      "enumerator_list",
+      "enumerator",
+      "try_statement",
+      "catch_statement",
+      "finally_clause"
+    ]
+  },
+  "java": {
+    "block_types": [
+      "method_declaration",
+      "class_declaration",
+      "interface_declaration",
+      "enum_declaration",
+      "record_declaration",
+      "constructor_declaration"
+    ],
+    "subblock_types": [
+      "block",
+      "formal_parameters",
+      "local_variable_declaration",
+      "expression_statement",
+      "if_statement",
+      "while_statement",
+      "for_statement",
+      "enhanced_for_statement",
+      "switch_expression",
+      "switch_rule",
+      "case_label",
+      "return_statement",
+      "throw_statement",
+      "catch_clause",
+      "finally_clause",
+      "yield_statement",
+      "try_statement",
+      "try_with_resources_statement",
+      "synchronized_statement",
+      "static_initializer"
+    ]
+  }, 
+  "vhdl": {
+    "block_types": [
+      "entity_declaration",
+      "architecture_body",
+      "process_statement",
+      "package_declaration",
+      "configuration_declaration",
+      "generate_statement"
+    ],
+    "subblock_types": [
+      "signal_assignment",
+      "variable_assignment",
+      "if_statement",
+      "case_statement",
+      "loop_statement",
+      "wait_statement",
+      "assert_statement",
+      "component_instantiation",
+      "concurrent_statement",
+      "sequential_statement"
+    ]
+  },
+  "bash": {
+    "block_types": [
+      "function_definition",
+      "compound_statement",
+      "subshell",
+      "pipeline",
+      "list"
+    ],
+    "subblock_types": [
+      "command",
+      "variable_assignment",
+      "redirected_statement",
+      "expression",
+      "assignment",
+      "test_command",
+      "negated_command",
+      "break_statement",
+      "continue_statement",
+      "return_statement",
+      "command_substitution",
+      "process_substitution",
+      "arithmetic_expansion",
+      "if_statement",
+      "while_statement",
+      "for_statement",
+      "c_style_for_statement",
+      "case_statement"
+    ]
+  },
+  "mojo": {
+    "block_types": [
+      "function_definition",
+      "struct_definition",
+      "trait_definition",
+      "class_definition",
+      "enum_definition"
+    ],
+    "subblock_types": [
+      "compound_statement",
+      "parameter_list",
+      "declaration",
+      "expression_statement",
+      "return_statement",
+      "assignment",
+      "augmented_assignment",
+      "try_statement",
+      "catch_clause",
+      "finally_clause",
+      "decorated_definition"
+    ]
+  }
+}
+
