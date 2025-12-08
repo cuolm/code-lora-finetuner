@@ -24,22 +24,23 @@ Fine-tuning is achieved by training a Low-Rank Adapter [LoRA](https://arxiv.org/
 To generate high-quality FIM examples, the system extracts high-level structural code blocks (e.g., functions, classes). From these blocks, logical sub-blocks (e.g., statements, expressions) are masked to serve as the "middle" section for the model to predict.
 
 Here is an example illustrating how a single FIM example is created:
-<div style="display:flex; justify-content:space-between; margin-top: -30px;padding-top: 0;">
-  <div style="width: 30%;">
-    <h5 style="margin-bottom: 2px;">Source Code File</h5>
-    <img src="docs/code_file.png" alt="code_file" style="width:100%; height:auto;">
-  </div>
+<table>
+  <tr>
+    <td align="center" valign="top">
+      <strong>Source Code File</strong><br>
+      <img src="docs/code_file.png" alt="code_file" width="250">
+    </td>
+    <td align="center" valign="top">
+      <strong>Code Block</strong><br>
+      <img src="docs/code_block.png" alt="code_block" width="250">
+    </td>
+    <td align="center" valign="top">
+      <strong>One Subblock</strong><br>
+      <img src="docs/code_subblock.png" alt="code_subblock" width="250">
+    </td>
+  </tr>
+</table>
 
-  <div style="width: 30%;">
-    <h5 style="margin-bottom: 2px;">Code Block</h5>
-    <img src="docs/code_block.png" alt="code_block" style="width:100%; height:auto;">
-  </div>
-
-  <div style="width: 30%;">
-    <h5 style="margin-bottom: 2px;">One Subblock</h5>
-    <img src="docs/code_subblock.png" alt="code_subblock" style="width:100%; height:auto;">
-  </div>
-</div>
 
 ```python
 <|fim_prefix|>uint32_t count_bits(uint32_t value){\n  uint32_t count = 0;\n  while(value){\n    
