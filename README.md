@@ -134,11 +134,16 @@ pip install -r requirements.txt
     python src/evaluate_model.py
     ```
 
+**Note:** There is also a bash script in the project root that automates the entire pipeline:
+```bash
+./run_pipeline.sh
+```
+
 ## How to Use The LoRA Finetuned Model
 You can use the fine-tuned model with any code autocompletion tool that supports FIM autocomplete models.
 This section shows how to use the VS Code extension [llama.vscode](https://github.com/ggml-org/llama.vscode) to run the model fully locally on your machine.
 1. Convert the fine-tuned model to GGUF format.  
-Clone the llama.cpp [llama.cpp](https://github.com/ggml-org/llama.cpp) repository to your local machine. Adjust the project_root_path variable to the path where you cloned this project's repository (code-lora-finetuner).
+Clone the [llama.cpp](https://github.com/ggml-org/llama.cpp) repository to your local machine. Adjust the project_root_path variable to the path where you cloned this project's repository (code-lora-finetuner).
     ```bash
     # IMPORTANT: Change this path to the actual root directory of this project!
     project_root_path="/path/to/your/code-lora-finetuner" 

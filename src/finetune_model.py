@@ -2,7 +2,8 @@ import argparse
 import json
 import math
 import shutil
-import sys
+import sys        
+import gc
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Tuple
@@ -10,8 +11,8 @@ from typing import List, Tuple
 import matplotlib.pyplot as plt
 import torch
 from datasets import Features, Sequence, Value, Dataset, load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
-from peft import LoraConfig, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments, BitsAndBytesConfig
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModel
 
 @dataclass
 class Config:
@@ -135,12 +136,29 @@ def load_and_configure_lora_model(config: Config) -> AutoModelForCausalLM:
         target_modules=config.lora_target_modules,
     )
 
-    model = AutoModelForCausalLM.from_pretrained(
-        pretrained_model_name_or_path=config.model_name,
-        dtype=torch.float16  # Reduces weights from 32-bit to 16-bit float.
-    ).to(config.device)
+    if config.device == "cuda":
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            pretrained_model_name_or_path=config.model_name,
+            quantization_config=bnb_config,
+            device_map="auto" # Let bitsandbytes handle placement
+        )
+        model = prepare_model_for_kbit_training(model)
+    elif config.device == "mps":
+        model = AutoModelForCausalLM.from_pretrained(
+            pretrained_model_name_or_path=config.model_name,
+            torch_dtype=torch.float16  # Reduces weights from 32-bit to 16-bit float.
+        ).to("mps")
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            pretrained_model_name_or_path=config.model_name,
+        ).to("cpu")
 
-    lora_model = get_peft_model(model, lora_config).to(config.device)
+    lora_model = get_peft_model(model, lora_config)
     return lora_model
 
 def train_and_save_lora_model(
@@ -149,7 +167,7 @@ def train_and_save_lora_model(
         train_dataset: Dataset,
         eval_dataset: Dataset,
         user_args: argparse.Namespace
-) -> Trainer:  
+) -> List:  
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
 
     training_args = TrainingArguments(
@@ -182,6 +200,22 @@ def train_and_save_lora_model(
         trainer.train() # train from scratch
 
     lora_model.save_pretrained(config.lora_adapter_path) # Save lora adapter only
+    log_history = trainer.state.log_history
+
+    if config.device == "cuda":
+        # Clear 4-bit model from VRAM to make room for the FP16 base model
+        del lora_model  # remove object references
+        gc.collect() # force python garbage collection
+        torch.cuda.empty_cache() # release unoccupied VRAM back to the GPU
+
+        # Load fresh FP16 base model
+        base_model = AutoModelForCausalLM.from_pretrained(
+            config.model_name,
+            dtype=torch.float16,
+            device_map="auto"
+        )
+
+        lora_model = PeftModel.from_pretrained(base_model, config.lora_adapter_path)
 
     # Merge lora adapter into base model and save it with the tokenizer of the model
     merged_model= lora_model.merge_and_unload() 
@@ -189,51 +223,45 @@ def train_and_save_lora_model(
     merged_model.save_pretrained(config.lora_model_path)
     tokenizer.save_pretrained(config.lora_model_path)
 
-    return trainer
+    return log_history 
 
-def save_log(config: Config, trainer: Trainer) -> None:
-    train_losses = []
-    eval_losses = []
-    learning_rates = []
-    epochs = []
-    steps = []
-
-    for entry in trainer.state.log_history:
-        if "loss" in entry:
-            train_losses.append(entry["loss"])
-        if "eval_loss" in entry:
-            eval_losses.append(entry["eval_loss"])
-        if "learning_rate" in entry:
-            learning_rates.append(entry["learning_rate"])
-        if "epoch" in entry:
-            epochs.append(entry["epoch"])
-        if "step" in entry:
-            steps.append(entry["step"])
-
-    log_data = {
-        "train_losses": train_losses,
-        "eval_losses": eval_losses,
-        "learning_rates": learning_rates,
-        "epochs": epochs,
-        "steps": steps,
+def save_log(config: Config, log_history: List) -> None:
+    history = {
+        "train": {"steps": [], "loss": [], "learning_rate": [], "epoch": []},
+        "eval": {"steps": [], "loss": [], "epoch": []}
     }
+
+    for entry in log_history:
+        # Training logs
+        if "loss" in entry:
+            history["train"]["loss"].append(entry["loss"])
+            history["train"]["steps"].append(entry["step"])
+            history["train"]["epoch"].append(entry.get("epoch"))
+            history["train"]["learning_rate"].append(entry.get("learning_rate"))
+        
+        # Evaluation logs
+        elif "eval_loss" in entry:
+            history["eval"]["loss"].append(entry["eval_loss"])
+            history["eval"]["steps"].append(entry["step"])
+            history["eval"]["epoch"].append(entry.get("epoch"))
 
     log_path = Path(config.trainer_output_dir_path) / "training_log.json"
     with log_path.open("w", encoding="utf-8") as f:
-        json.dump(log_data, f, indent=2)
+        json.dump(history, f, indent=2)
 
 def plot_loss(config: Config) -> None:
     losses_path = Path(config.trainer_output_dir_path) / "training_log.json"
     with losses_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
 
-    train_losses = data["train_losses"]
-    eval_losses = data["eval_losses"]
-    train_x = [i * config.trainer_logging_steps for i in range(len(train_losses))]
-    eval_x = [i * config.trainer_eval_steps for i in range(len(eval_losses))]
-    plt.figure(figsize=(8,5))
-    plt.plot(train_x, train_losses, label="Train Loss")
-    plt.plot(eval_x, eval_losses, label="Eval Loss")
+    plt.figure(figsize=(8, 5))
+    
+    if data["train"]["steps"]:
+        plt.plot(data["train"]["steps"], data["train"]["loss"], label="Train Loss")
+    
+    if data["eval"]["steps"]:
+        plt.plot(data["eval"]["steps"], data["eval"]["loss"], label="Eval Loss", marker='o')
+
     plt.xlabel("Step")
     plt.ylabel("Loss")
     plt.title("Training and Evaluation Loss")
@@ -249,8 +277,8 @@ def main():
 
     lora_model = load_and_configure_lora_model(config)
     lora_model.print_trainable_parameters()
-    trainer = train_and_save_lora_model(config, lora_model, train_dataset, eval_dataset, user_args)
-    save_log(config, trainer)
+    log_history = train_and_save_lora_model(config, lora_model, train_dataset, eval_dataset, user_args)
+    save_log(config, log_history)
 
     plot_loss(config)
 

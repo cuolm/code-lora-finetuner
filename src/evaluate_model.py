@@ -69,6 +69,14 @@ def plot_loss(logging_steps: int, project_root_path: str) -> None:
     plt.legend()
     plt.grid(True)
     plt.show()
+
+
+def empty_device_cache(device: str) -> None:
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    elif device == "mps":
+        torch.mps.empty_cache()
+    # cpu: nothing to do
     
 
 def main():
@@ -78,12 +86,15 @@ def main():
 
     #plot_loss(20, project_root_path)
 
-    base_model_name = "Qwen/Qwen2.5-Coder-1.5B"
+    base_model_name = "Qwen/Qwen2.5-Coder-0.5B"
     base_model = AutoModelForCausalLM.from_pretrained(base_model_name).to(device)
     base_model_perplexity, base_model_results = evaluate_model(project_root_path, base_model, test_dataset)
     print(base_model_perplexity)
     print(f"Base model perplexity: {base_model_perplexity}")
     print(f"Base model results: {base_model_results}")
+
+    del base_model
+    empty_device_cache(device)
 
     lora_model_name = f"{project_root_path}/lora_model"
     lora_model = AutoModelForCausalLM.from_pretrained(lora_model_name).to(device)
