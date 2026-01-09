@@ -16,9 +16,9 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, Pe
 
 @dataclass
 class Config:
-    model_name: str = "Qwen/Qwen2.5-Coder-0.5B"
-    lora_r: int = 16                   
-    lora_alpha: int = 32 
+    model_name: str = "Qwen/Qwen2.5-Coder-1.5B"
+    lora_r: int = 32 
+    lora_alpha: int = 64
     lora_dropout: float = 0.1          
     lora_bias: str = "none"            
     lora_target_modules: List[str] = field(default_factory=lambda:[
@@ -31,11 +31,11 @@ class Config:
         "up_proj"     
     ])
     trainer_num_train_epochs: int = 1 
-    trainer_per_device_train_batch_size: int = 4 
-    trainer_per_device_eval_batch_size: int = 4 
-    trainer_gradient_accumulation_steps: int = 16   # Number of forward/backward passes to accumulate before performing one optimizer step.
+    trainer_per_device_train_batch_size: int = 8 
+    trainer_per_device_eval_batch_size: int = 8 
+    trainer_gradient_accumulation_steps: int = 4 # Number of forward/backward passes to accumulate before performing one optimizer step.
     trainer_max_steps: int = field(init=False)
-    trainer_learning_rate: float = 5e-5
+    trainer_learning_rate: float = 2e-5
     trainer_logging_steps: int = 10   # Average training loss over trainer_logging_steps period is calculated and logged.
     trainer_eval_strategy: str = "steps"
     trainer_eval_steps: int = 10

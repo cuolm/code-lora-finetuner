@@ -1,4 +1,5 @@
 import torch
+import textwrap
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from pathlib import Path
 from peft import PeftModel
@@ -16,7 +17,7 @@ def check_device() -> str:
 def generate_from(model_name: str, prompt: str) -> str:
     device = check_device()
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name).to(device)
+    model = AutoModelForCausalLM.from_pretrained(model_name, dtype=torch.float16).to(device)
 
     model.eval()
     model_inputs = tokenizer(prompt, return_tensors="pt")
@@ -51,10 +52,11 @@ def generate_from_lora_augmented(base_model_path: str, lora_adapter_path: str, p
 def main():
     project_root_path = Path(__file__).resolve().parent.parent
 
-    prefix_c = """int add(uint8_t a, uint8_t b){""" 
-
-    suffix_c = """
-    }"""
+    prefix_c = textwrap.dedent("""\
+    static inline int 
+    """)
+    suffix_c = textwrap.dedent("""\
+    """)
 
     prefix_prompt = prefix_c 
 

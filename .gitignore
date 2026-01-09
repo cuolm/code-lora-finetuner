@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# VS Code
+.vscode
+
 # Project specific 
 datasets/
 data/

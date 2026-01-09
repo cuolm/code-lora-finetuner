@@ -37,7 +37,7 @@ def evaluate_model(project_root_path: str, model: AutoModelForCausalLM, test_dat
     If PP=50, the model is 5 times more uncertain. Lower PP is always better.
     """
     eval_args = TrainingArguments(
-        output_dir=f"{project_root_path}./eval_results", 
+        output_dir=f"{project_root_path}/eval_results", 
         per_device_eval_batch_size=5, 
     )
     
@@ -86,7 +86,7 @@ def main():
 
     #plot_loss(20, project_root_path)
 
-    base_model_name = "Qwen/Qwen2.5-Coder-0.5B"
+    base_model_name = "Qwen/Qwen2.5-Coder-1.5B"
     base_model = AutoModelForCausalLM.from_pretrained(base_model_name).to(device)
     base_model_perplexity, base_model_results = evaluate_model(project_root_path, base_model, test_dataset)
     print(base_model_perplexity)
