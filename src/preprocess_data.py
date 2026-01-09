@@ -16,7 +16,7 @@ CodeBlocks = list[Tuple[bytes, ts.Node]]
 
 @dataclass
 class Config:
-    model_name: str = "Qwen/Qwen2.5-Coder-0.5B"
+    model_name: str = "Qwen/Qwen2.5-Coder-1.5B"
     fim_prefix_token: str = "<|fim_prefix|>"
     fim_middle_token: str = "<|fim_middle|>"
     fim_suffix_token: str = "<|fim_suffix|>"

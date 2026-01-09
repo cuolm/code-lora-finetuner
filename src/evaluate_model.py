@@ -37,7 +37,7 @@ def evaluate_model(project_root_path: str, model: AutoModelForCausalLM, test_dat
     If PP=50, the model is 5 times more uncertain. Lower PP is always better.
     """
     eval_args = TrainingArguments(
-        output_dir=f"{project_root_path}./eval_results", 
+        output_dir=f"{project_root_path}/eval_results", 
         per_device_eval_batch_size=5, 
     )
     
@@ -69,6 +69,14 @@ def plot_loss(logging_steps: int, project_root_path: str) -> None:
     plt.legend()
     plt.grid(True)
     plt.show()
+
+
+def empty_device_cache(device: str) -> None:
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    elif device == "mps":
+        torch.mps.empty_cache()
+    # cpu: nothing to do
     
 
 def main():
@@ -84,6 +92,9 @@ def main():
     print(base_model_perplexity)
     print(f"Base model perplexity: {base_model_perplexity}")
     print(f"Base model results: {base_model_results}")
+
+    del base_model
+    empty_device_cache(device)
 
     lora_model_name = f"{project_root_path}/lora_model"
     lora_model = AutoModelForCausalLM.from_pretrained(lora_model_name).to(device)

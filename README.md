@@ -129,16 +129,22 @@ pip install -r requirements.txt
     * Resume training from a specific checkpoint by using `--resume="checkpoint-name"`.
     * Use `--resume="last"` to continue from the most recent checkpoint in the `./results` directory.
 
-5.  Evaluate the finetuned model and compare its **performance** to the base model using `evaluate_model.py`:
+5.  Evaluate the finetuned model and compare its performance to the base model using `evaluate_model.py`:
     ```bash
     python src/evaluate_model.py
     ```
+**Complete Example**: Fine-tuning on [Zephyr](https://github.com/zephyrproject-rtos/zephyr) kernel with all parameters, loss plots, evaluation results, and generation output: [see here](docs/finetuner_example/finetuner-example.md)
+
+**Note:** There is also a bash script in the project root that automates the entire pipeline:
+```bash
+./run_pipeline.sh
+```
 
 ## How to Use The LoRA Finetuned Model
 You can use the fine-tuned model with any code autocompletion tool that supports FIM autocomplete models.
 This section shows how to use the VS Code extension [llama.vscode](https://github.com/ggml-org/llama.vscode) to run the model fully locally on your machine.
 1. Convert the fine-tuned model to GGUF format.  
-Clone the llama.cpp [llama.cpp](https://github.com/ggml-org/llama.cpp) repository to your local machine. Adjust the project_root_path variable to the path where you cloned this project's repository (code-lora-finetuner).
+Clone the [llama.cpp](https://github.com/ggml-org/llama.cpp) repository to your local machine. Adjust the project_root_path variable to the path where you cloned this project's repository (code-lora-finetuner).
     ```bash
     # IMPORTANT: Change this path to the actual root directory of this project!
     project_root_path="/path/to/your/code-lora-finetuner" 
