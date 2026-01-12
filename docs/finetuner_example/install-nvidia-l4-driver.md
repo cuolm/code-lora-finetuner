@@ -1,6 +1,6 @@
 # NVIDIA L4 Driver Installation (Debian 11)
 
-This guide installs the correct NVIDIA driver (≥525) for an L4 GPU on Debian 11, with optional CUDA and a quick PyTorch CUDA check.
+This guide installs the correct NVIDIA driver (≥525) for an L4 GPU on Debian 11, with optional CUDA and PyTorch CUDA check.
 
 ## 1. Update the system
 Update package lists and upgrade installed packages to avoid dependency conflicts.
@@ -9,7 +9,7 @@ sudo apt update && sudo apt upgrade -y
 ```
 
 ## 2. Remove old NVIDIA drivers (if any)
-Clean out previous driver or CUDA installs to prevent version clashes.
+Clean out previous driver or CUDA installs to prevent version conflicts.
 ```bash
 sudo apt autoremove 'nvidia*' --purge
 # If you previously used .run installers:
@@ -68,7 +68,7 @@ sudo apt install -y linux-headers-$(uname -r)
 
 ## 9. Install the NVIDIA driver (with or without CUDA)
 Choose one of the following, depending on whether you need CUDA libraries.
-- Driver only (no CUDA toolkit):
+- Driver only:
     ```bash
     sudo apt install -y nvidia-driver nvidia-smi nvidia-settings
     ```

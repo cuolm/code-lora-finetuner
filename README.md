@@ -2,7 +2,7 @@
 
 Create your own local code autocomplete model, fine-tuned on your custom code repository, for use in editors like VS Code or Neovim.
 
-Fine-tuning is achieved by training a Low-Rank Adapter [LoRA](https://arxiv.org/abs/2106.09685) to perform Fill-In-the-Middle ([FIM](https://arxiv.org/abs/2207.14255)) completion. 
+Fine-tuning is achieved by training a Low-Rank Adapter ([LoRA](https://arxiv.org/abs/2106.09685)) to perform Fill-In-the-Middle ([FIM](https://arxiv.org/abs/2207.14255)) completion. 
 
 ## Project Structure
 ```
@@ -80,9 +80,9 @@ pip install -r requirements.txt
 ```
 ## Configure and LoRA Fine-tune Model
 
-1.  Place the source code files you want to train on in the `./data` folder.
-    * **Auto Split:** Place files directly into `./data`.
-    * **Manual Split:** Create `train`, `eval`, and `test` subfolders inside `./data` and manually assign files to them.
+1.  Place the source code files you want to train on in the `data` folder.
+    * **Auto Split:** Place files directly into `data`.
+    * **Manual Split:** Create `train`, `eval`, and `test` subfolders inside `data` and manually assign files to them.
 
 2. Make sure that the language of your source code files is listed in the [tree-sitter-language-pack](https://github.com/Goldziher/tree-sitter-language-pack?tab=readme-ov-file#available-languages) library that is used to process the data. If it is not available, go to [this](#build-a-custom-tree-sitter-language-parser) section to build a custom language tree-sitter parser.
 
@@ -97,7 +97,7 @@ pip install -r requirements.txt
 
 
 
-3. Preprocess the raw code files into training, evaluation, and test datasets using the `preprocess_data.py` script. You can change the most important parameters from their default value by using the following flags:
+3. Preprocess the raw code files into training, evaluation, and test datasets using the `src/preprocess_data.py` script. You can change the most important parameters from their default value by using the following flags:
 
     * `--extensions`: Specifies a list of file extensions to include in the dataset (e.g., `.c`, `.h`, `.cpp`, `.py`). Default is `.c .h`.
     * `--source-files-language`: Specifies the language for tree-sitter parsing (e.g., `c`, `python`, `java`). Default is `c`.  
@@ -120,7 +120,7 @@ pip install -r requirements.txt
         --tree-sitter-parser-path "$PWD/third_party/tree-sitter-c/libtree-sitter-c.dylib"
     ```
 
-4.  Fine-tune the model using `finetune_model.py`.
+4.  Fine-tune the model using `src/finetune_model.py`.
     Parameters can be changed in the `Config` dataclass at the top of the file if needed:
     ```bash
     python src/finetune_model.py
@@ -144,9 +144,8 @@ pip install -r requirements.txt
 You can use the fine-tuned model with any code autocompletion tool that supports FIM autocomplete models.
 This section shows how to use the VS Code extension [llama.vscode](https://github.com/ggml-org/llama.vscode) to run the model fully locally on your machine.
 1. Convert the fine-tuned model to GGUF format.  
-Clone the [llama.cpp](https://github.com/ggml-org/llama.cpp) repository to your local machine. Adjust the project_root_path variable to the path where you cloned this project's repository (code-lora-finetuner).
+Clone the [llama.cpp](https://github.com/ggml-org/llama.cpp) repository to your local machine. Adjust the `project_root_path` variable to the path where you cloned this project's repository (code-lora-finetuner).
     ```bash
-    # IMPORTANT: Change this path to the actual root directory of this project!
     project_root_path="/path/to/your/code-lora-finetuner" 
 
     git clone https://github.com/ggml-org/llama.cpp
@@ -166,7 +165,7 @@ Clone the [llama.cpp](https://github.com/ggml-org/llama.cpp) repository to your 
     Show the llama-vscode menu by clicking llama-vscode in the status bar or pressing Ctrl+Shift+M, then select "Install/Upgrade" llama.cpp.
     ![InstallLlamaCpp](docs/InstallLlamaCpp.png)
 
-    Alternatively you can also install llama.cpp manually via Homebrew (MacOS)
+    On MacOS you can also install llama.cpp manually via Homebrew instead of installing llama.cpp from the llama-vscode status bar.
     ```bash
     brew install llama.cpp
     ```
@@ -191,9 +190,9 @@ Clone the [llama.cpp](https://github.com/ggml-org/llama.cpp) repository to your 
 ## Create And Run Docker Image
 
 #### 1. Build the Docker Image
-Build the image from the `Dockerfile`, tagging it as codelora-image.
+Build the image from the `Dockerfile`, tagging it as code-lora-finetuner-image.
 ```bash
-docker build -t codelora-image .
+docker build -t code-lora-finetuner-image .
 ```
 #### 2. Prepare Data and Run the Container
 To allow the container to access your source code for fine-tuning, use a bind mount to link your host machine's `data` directory to the container.
@@ -208,7 +207,7 @@ Within the container, navigate the file system and edit scripts with vim to adju
 
 ## Build a Custom Tree-sitter Language Parser
 
-If the language you want to use for fine-tuning is not present in the [Tree-sitter Language Pack](https://github.com/Goldziher/tree-sitter-language-pack), you can build a tree-sitter language parser from source. Here is an example for the Mojo programming language:
+If the language you want to use for fine-tuning is not present in the [tree-sitter-language-pack](https://github.com/Goldziher/tree-sitter-language-pack), you can build a tree-sitter language parser from source. Here is an example for the Mojo programming language:
 
 #### 1. Add as Submodule and Build
 

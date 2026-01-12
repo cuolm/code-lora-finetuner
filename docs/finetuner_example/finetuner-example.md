@@ -1,6 +1,6 @@
 ## Example: Fine-tuning on the [Zephyr](https://github.com/zephyrproject-rtos/zephyr) kernel code
 
-This example shows how to fine-tune a Qwen2.5-Coder-1.5B on the Zephyr kernel code using an NVIDIA L4 GPU on Google Cloud. For setup assistance, refer to the [installation guide](install-nvidia-l4-driver.md) for NVIDIA L4 driver on Debian 11.
+This example shows how to fine-tune a Qwen2.5-Coder-1.5B model using LoRA on the Zephyr kernel code, with an NVIDIA L4 GPU on a Google Cloud VM (GCE). For setup assistance, refer to the [installation guide](install-nvidia-l4-driver.md) for NVIDIA L4 driver on Debian 11.
 
 ### Configuration Parameters
 
@@ -38,7 +38,7 @@ This example shows how to fine-tune a Qwen2.5-Coder-1.5B on the Zephyr kernel co
 
 #### 1. Clone Repository
 ```bash
-# Make sure you are at the root of this project
+# Ensure you are in the project root before running
 git clone https://github.com/zephyrproject-rtos/zephyr.git data/zephyr
 ```
 
