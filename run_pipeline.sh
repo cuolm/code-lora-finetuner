@@ -4,13 +4,17 @@ set -e
 source .venv/bin/activate
 echo "Activated virtual environment."
 
+echo "Ensure the base model matches in all 3 scripts."
+echo "(preprocess_data.py, finetune_model.py, evaluate_model.py)"
+read -p "Confirm with [Enter]..."
+
 echo "Enter your project settings:"
 read -p "File extensions (ex: .c .h): " EXTENSIONS
 read -p "Source language (ex: c): " LANGUAGE
 read -p "Data folder path (ex: ./data): " DATA_PATH
 
 echo "Choose split mode:"
-echo "1) Auto split (recommended)"
+echo "1) Auto split"
 echo "2) Manual split (create train/, eval/, test/ folders INSIDE $DATA_PATH first)"
 read -p "Enter 1 or 2: " choice
 
