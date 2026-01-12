@@ -44,16 +44,18 @@ def test_load_and_configure_lora_model(config_fixture):
 def test_save_log(config_fixture):
     log_file = config_fixture.trainer_output_dir_path / "training_log.json"
     log_file.unlink(missing_ok=True)  # Delete if file exists in directory
-    trainer = MagicMock()
-    trainer.state.log_history = [
+
+    log_history = [
         {"loss": 1.23, "epoch": 1, "step": 10},
-        {"eval_loss": 1.10, "epoch": 1, "step": 20},
+        {"eval_loss": 1.10, "epoch": 1, "step": 10},
     ]
 
-    finetune_model.save_log(config_fixture, trainer)
+    finetune_model.save_log(config_fixture, log_history)
 
     assert log_file.exists()
     content = json.loads(log_file.read_text())
-    assert "train_losses" in content and len(content["train_losses"]) == 1
-    assert "eval_losses" in content and len(content["eval_losses"]) == 1
+    assert "train" in content
+    assert content["train"]["loss"][0] == 1.23
+    assert "eval" in content 
+    assert content["eval"]["steps"][0] == 10 
     log_file.unlink(missing_ok=True)  # Delete log file so folder is clean for next test run
