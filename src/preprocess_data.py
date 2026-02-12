@@ -3,26 +3,26 @@ import argparse
 import ctypes
 
 from pathlib import Path
-from typing import Iterator, Tuple, Mapping
+from typing import Iterator, Tuple, Mapping, List
 from dataclasses import dataclass, field
 
 from transformers import AutoTokenizer
 import numpy as np
 import tree_sitter as ts 
 from tree_sitter_language_pack import get_parser
-import torch
 
 CodeBlocks = list[Tuple[bytes, ts.Node]]
 
 @dataclass
 class Config:
-    model_name: str = "Qwen/Qwen2.5-Coder-1.5B"
+    model_name: str = "Qwen/Qwen2.5-Coder-7B"
     fim_prefix_token: str = "<|fim_prefix|>"
     fim_middle_token: str = "<|fim_middle|>"
     fim_suffix_token: str = "<|fim_suffix|>"
     fim_pad_token: str = "<|fim_pad|>"
     byte_per_token_ratio: int = 3  # Assuming a byte per token ratio of 3
     bytes_per_code_block: int = 500 * byte_per_token_ratio   
+    tokenizer_batch_size: int = 32 
     fim_examples_per_subblock_ratio: float = 1.0 
     train_ratio: float = 0.8
     eval_ratio: float = 0.1
@@ -115,6 +115,27 @@ def parse_args() -> argparse.Namespace:
 
     return parser.parse_args()
 
+def _clear_existing_datasets(config: Config) -> None:
+    dataset_files = [config.train_path, config.eval_path, config.test_path]
+    
+    found_existing = False
+    for f in dataset_files:
+        if f.exists():
+            found_existing = True
+
+    if not found_existing:
+        return
+
+    confirm = input("Found existing files. Delete and start fresh? (y/n): ").lower()
+
+    if confirm == 'y':
+        for f in dataset_files:
+            if f.exists():
+                f.unlink()
+        print("Old data deleted.")
+    else:
+        exit()
+
 def _get_custom_tree_sitter_parser(tree_sitter_lib_path: Path, source_files_language: str) -> ts.Parser:
         lib = ctypes.CDLL(str(tree_sitter_lib_path)) # Load C Dynamic Link Library, makes all the public C functions inside the .dylib file available to be called from the Python script.
         entry_point_func_name = f"tree_sitter_{source_files_language}"
@@ -171,6 +192,15 @@ def _extract_code_blocks(config: Config, node: ts.Node, source_code_utf8: bytes)
     return code_blocks
 
 def _get_code_blocks_from_paths(config: Config, file_paths: list[Path]) -> Iterator[Tuple[bytes, ts.Node]]:
+    """
+    Generator function yielding code blocks from files one-by-one.
+
+    How generators work:
+    1. Call function: get iterator object (doesn't run code yet)
+    2. next(iterator): processes 1 file, yields first block, then pauses  
+    3. next(iterator): resumes, yields next block, then pauses
+    4. Repeat until end of code blocks, then the generator is exhausted. Generators can only be used once.
+    """
     for path in file_paths:
         if not path.is_file():   
             continue
@@ -188,18 +218,17 @@ def _get_code_blocks_from_paths(config: Config, file_paths: list[Path]) -> Itera
             continue
         root_node = tree.root_node
 
-        # Extract logical code blocks and yield each as a tuple consisting of the block source code and the tree-sitter node associated with it
         code_blocks = _extract_code_blocks(config, root_node, source_code_utf8)
         config.rng.shuffle(code_blocks)
         for block in code_blocks:
-            yield block # Yield supports streaming large amounts of data and avoids high memory usage
+            yield block  # Yields one block at the time 
 
-def get_code_blocks_from_auto_split(config: Config) -> Tuple[CodeBlocks, CodeBlocks, CodeBlocks]: 
+def get_code_blocks_from_auto_split(config: Config) -> Tuple[Iterator[Tuple[bytes, ts.Node]], Iterator[Tuple[bytes, ts.Node]], Iterator[Tuple[bytes, ts.Node]]]:
     train_file_paths, eval_file_paths, test_file_paths = auto_create_split_paths(config)
-    train_code_blocks = list(_get_code_blocks_from_paths(config, train_file_paths))
-    eval_code_blocks = list(_get_code_blocks_from_paths(config, eval_file_paths))
-    test_code_blocks = list(_get_code_blocks_from_paths(config, test_file_paths))
-    return train_code_blocks, eval_code_blocks, test_code_blocks
+    train_code_blocks_iter = _get_code_blocks_from_paths(config, train_file_paths)
+    eval_code_blocks_iter = _get_code_blocks_from_paths(config, eval_file_paths)  
+    test_code_blocks_iter =  _get_code_blocks_from_paths(config, test_file_paths)
+    return train_code_blocks_iter, eval_code_blocks_iter, test_code_blocks_iter 
 
 def _check_required_directories(root_path: Path, required_dirs: list[str]):
     missing_paths = []
@@ -225,16 +254,16 @@ def _get_filtered_paths(config: Config, directory: Path) -> list[Path]:
 
     return filtered_paths
 
-def get_code_blocks_from_manual_split(config: Config) -> Tuple[CodeBlocks, CodeBlocks, CodeBlocks]:
+def get_code_blocks_from_manual_split(config: Config) -> Tuple[Iterator[Tuple[bytes, ts.Node]], Iterator[Tuple[bytes, ts.Node]], Iterator[Tuple[bytes, ts.Node]]]:
     _check_required_directories(config.raw_data_path, ["train", "eval", "test"])
-    train_paths = _get_filtered_paths(config, config.raw_data_path / "train")
-    eval_paths  = _get_filtered_paths(config, config.raw_data_path / "eval")
-    test_paths  = _get_filtered_paths(config, config.raw_data_path / "test")
+    train_file_paths = _get_filtered_paths(config, config.raw_data_path / "train")
+    eval_file_paths  = _get_filtered_paths(config, config.raw_data_path / "eval")
+    test_file_paths  = _get_filtered_paths(config, config.raw_data_path / "test")
 
-    train_blocks = list(_get_code_blocks_from_paths(config, train_paths))
-    eval_blocks  = list(_get_code_blocks_from_paths(config, eval_paths))
-    test_blocks  = list(_get_code_blocks_from_paths(config, test_paths))
-    return train_blocks, eval_blocks, test_blocks
+    train_code_blocks_iter = _get_code_blocks_from_paths(config, train_file_paths)
+    eval_code_blocks_iter = _get_code_blocks_from_paths(config, eval_file_paths) 
+    test_code_blocks_iter = _get_code_blocks_from_paths(config, test_file_paths) 
+    return train_code_blocks_iter, eval_code_blocks_iter, test_code_blocks_iter
 
 def _extract_subblock_ranges(config: Config, node: ts.Node, base_offset: int) -> list[Tuple[int, int]]:
     """
@@ -299,10 +328,14 @@ def _generate_fim_examples_from_code_block(config: Config, code_utf8: bytes, sub
 
     return fim_examples
 
-def create_fim_examples(config: Config, code_blocks: CodeBlocks) -> list[bytes]:
-    fim_examples = []
+def create_fim_examples(config: Config, code_blocks_iter: Iterator[Tuple[bytes, ts.Node]]) -> Iterator[bytes]:
+    """
+    Generator function that takes a generator iterator of code blocks as input, 
+    generates FIM examples from each code block and returns a generator iterator 
+    over all created FIM examples.
+    """
 
-    for code_utf8, node in code_blocks:
+    for code_block_utf8, node in code_blocks_iter:
         base_offset = node.start_byte
         subblock_ranges = _extract_subblock_ranges(config, node, base_offset)
         
@@ -311,31 +344,27 @@ def create_fim_examples(config: Config, code_blocks: CodeBlocks) -> list[bytes]:
 
         subblock_ranges = _filter_subblocks(subblock_ranges, config.bytes_per_code_block ) 
         
-        code_utf8 = code_utf8[:config.bytes_per_code_block]  # Trunctate code block code if it is larger than bytes_per_code_block.
+        code_block_utf8 = code_block_utf8[:config.bytes_per_code_block]  # Trunctate code block code if it is larger than bytes_per_code_block, we only consider subblocks inside this range
 
-        fim_examples_of_code_block = _generate_fim_examples_from_code_block(config, code_utf8, subblock_ranges)
-        fim_examples.extend(fim_examples_of_code_block)
+        fim_examples = _generate_fim_examples_from_code_block(config, code_block_utf8, subblock_ranges)
+        for fim_example in fim_examples:
+            yield fim_example
 
-    config.rng.shuffle(fim_examples)  # Shuffle FIM examples to avoid that all fim examples of same code block are grouped together. 
-    
-    return fim_examples
 
-def _find_first_token_idx(sequence: torch.Tensor, token_id: int) -> int:
+def _find_first_token_idx(sequence: List[int], token_id: int) -> int:
     for idx, token in enumerate(sequence):
-        if token.item() == token_id:
+        if token == token_id:
             return idx
     return -1
 
-def _mask_labels(config: Config, input_ids: torch.Tensor, tokenizer: AutoTokenizer) -> torch.Tensor:
+def _mask_labels(config: Config, input_ids: List[List[int]], tokenizer: AutoTokenizer) -> List[List[int]]:
     fim_middle_token_id = tokenizer.convert_tokens_to_ids(config.fim_middle_token)
     fim_pad_token_id = tokenizer.convert_tokens_to_ids(config.fim_pad_token)
 
-    labels = torch.full_like(input_ids, -100)  # Initialize labels with -100 (pytorch ignore index)
+    labels = []
 
-    batch_size, seq_len = input_ids.shape
-
-    for i in range(batch_size):
-        sequence = input_ids[i]
+    for idx, sequence in enumerate(input_ids):
+        sequence_labels = [-100] * len(sequence)  # Initialize labels with -100 (pytorchignore index)
 
         middle_token_idx = _find_first_token_idx(sequence, fim_middle_token_id)
         if middle_token_idx == -1:
@@ -344,43 +373,54 @@ def _mask_labels(config: Config, input_ids: torch.Tensor, tokenizer: AutoTokeniz
         middle_start_idx = middle_token_idx + 1
 
         # Copy tokens after the middle token to labels
-        labels[i, middle_start_idx:] = sequence[middle_start_idx:]
-
-        # Mask out the padding tokens in labels 
-        for j in range(seq_len):
-            if sequence[j].item() == fim_pad_token_id:
-                labels[i, j] = -100
+        for j in range(middle_start_idx, len(sequence)):
+            sequence_labels[j] = sequence[j]
+        labels.append(sequence_labels)
 
     return labels
 
-def tokenize_examples(config: Config, examples_utf8: list[bytes], tokenizer: AutoTokenizer) -> Mapping[str, torch.Tensor]:
-    examples_unicode = []
-    for example in examples_utf8:
-        examples_unicode.append(example.decode('utf-8'))
-
-    tokenized_examples = tokenizer(
-        examples_unicode,
-        padding=True,           # Pad to the longest example in the batch
-        return_tensors="pt",    # Return PyTorch tensors 
-        return_attention_mask=True,  # The attention_maks tells the model which tokens are actual content vs which tokens are padding
-    )
-
-    tokenized_examples["labels"] = _mask_labels(config, tokenized_examples["input_ids"], tokenizer)
-
-    return tokenized_examples
-
-def save_batch_as_jsonl(file_path: Path, batch: Mapping[str, torch.Tensor]):
+def _save_tokenized_batch_as_jsonl(file_path: Path, batch: Mapping[str, List[List[int]]]):
     file_path.parent.mkdir(parents=True, exist_ok=True)     # Ensure file parent directories exist
 
-    with open(file_path, 'w', encoding='utf-8') as f:
-        batch_size = batch['input_ids'].size(0)
+    with open(file_path, 'a', encoding='utf-8') as f:
+        batch_size = len(batch['input_ids'])
         for i in range(batch_size):
+            input_ids = batch['input_ids'][i]
+            attention_mask = batch['attention_mask'][i]
+            labels = batch['labels'][i]
+            
             example = {
-                'input_ids': batch['input_ids'][i].tolist(),
-                'attention_mask': batch['attention_mask'][i].tolist(),
-                'labels': batch['labels'][i].tolist()
+                'input_ids': input_ids,
+                'attention_mask': attention_mask,
+                'labels': labels
             }
             f.write(json.dumps(example, ensure_ascii=False) + '\n')  # Ensre utf8 encoding
+
+def tokenize_and_save_fim_examples(config: Config, file_path: Path, fim_examples_iter: Iterator[bytes], tokenizer: AutoTokenizer): 
+    batch = []
+
+    for fim_example in fim_examples_iter:
+        batch.append(fim_example.decode('utf-8'))
+        if (len(batch) == config.tokenizer_batch_size):
+            tokenized_batch = tokenizer(
+                batch,
+                padding=False,
+                return_tensors=None,
+                return_attention_mask=True
+            )
+            tokenized_batch["labels"] = _mask_labels(config, tokenized_batch["input_ids"], tokenizer)
+            _save_tokenized_batch_as_jsonl(file_path, tokenized_batch)
+            batch = []
+    # last batch only
+    if batch:
+        tokenized_batch = tokenizer(
+            batch,
+            padding=False,
+            return_tensors=None,
+            return_attention_mask=True
+        )
+        tokenized_batch["labels"] = _mask_labels(config, tokenized_batch["input_ids"], tokenizer)
+        _save_tokenized_batch_as_jsonl(file_path, tokenized_batch)
 
 def main():
     user_args = parse_args()
@@ -395,28 +435,27 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     tokenizer.pad_token = config.fim_pad_token  # Use FIM pad token for padding instead of default pad token
 
+    _clear_existing_datasets(config)
+
     if user_args.split_mode == "auto":
         print("Using auto-generated dataset split.")
-        train_code_blocks, eval_code_blocks, test_code_blocks = get_code_blocks_from_auto_split(config) 
+        train_code_blocks_iter, eval_code_blocks_iter, test_code_blocks_iter = get_code_blocks_from_auto_split(config) 
     elif user_args.split_mode == "manual":
         print("Using manual dataset split from directories.")
-        train_code_blocks, eval_code_blocks, test_code_blocks = get_code_blocks_from_manual_split(config) 
+        train_code_blocks_iter, eval_code_blocks_iter, test_code_blocks_iter = get_code_blocks_from_manual_split(config) 
     else:
         raise ValueError(f"Unknown split mode: {user_args.split_mode}") 
 
-    train_examples = create_fim_examples(config, train_code_blocks)
-    eval_examples = create_fim_examples(config, eval_code_blocks)
-    test_examples = create_fim_examples(config, test_code_blocks)
+    train_fim_examples_iter= create_fim_examples(config, train_code_blocks_iter)
+    eval_fim_examples_iter = create_fim_examples(config, eval_code_blocks_iter)
+    test_fim_examples_iter = create_fim_examples(config, test_code_blocks_iter)
+    
+    tokenize_and_save_fim_examples(config, config.train_path, train_fim_examples_iter, tokenizer)
+    tokenize_and_save_fim_examples(config, config.eval_path, eval_fim_examples_iter, tokenizer)
+    tokenize_and_save_fim_examples(config, config.test_path, test_fim_examples_iter, tokenizer)
 
-    tokenized_train_examples = tokenize_examples(config, train_examples, tokenizer)
-    tokenized_eval_examples = tokenize_examples(config, eval_examples, tokenizer)
-    tokenized_test_examples = tokenize_examples(config, test_examples, tokenizer)
-
-    save_batch_as_jsonl(config.train_path, tokenized_train_examples)
-    save_batch_as_jsonl(config.eval_path, tokenized_eval_examples)
-    save_batch_as_jsonl(config.test_path, tokenized_test_examples)
-
-    print(f"Saved {len(tokenized_train_examples['input_ids'])} train examples, {len(tokenized_eval_examples['input_ids'])} eval examples and {len(tokenized_test_examples['input_ids'])} test examples")
+    print("Saved train, eval, test datasets to disk")  
+   
 
 if __name__ == "__main__":
     main()
