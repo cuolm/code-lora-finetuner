@@ -20,13 +20,16 @@ class Config:
     fim_middle_token: str = "<|fim_middle|>"
     fim_suffix_token: str = "<|fim_suffix|>"
     fim_pad_token: str = "<|fim_pad|>"
-    byte_per_token_ratio: int = 3  # Assuming a byte per token ratio of 3
-    bytes_per_code_block: int = 500 * byte_per_token_ratio   
-    tokenizer_batch_size: int = 32 
-    fim_examples_per_subblock_ratio: float = 1.0 
+    eos_token: str = "<|endoftext|>"
+    max_token_sequence_length: int = 1024  # used with estimated bytes_per_token_ratio to convert bytes to tokens, final token count is thus not exact
+    max_code_blocks_ast_depth: int = 2  # depth 1 is root, 2 includes child nodes (e.g. functions)
+    min_middle_tokens_length: int = 10  # used with estimated bytes_per_token_ratio to convert bytes to tokens, final token count is thus not exact
+    max_middle_tokens_length: int = max_token_sequence_length  # used with estimated bytes_per_token_ratio to convert bytes to tokens, final token count is thus not exact
+    fim_examples_per_subblock_ratio: float = 1.0  # 1.0 = all fim examples of a subblock are extracted, 0.5 = onls 50% of fim examples of a subblock are extracted 
     train_ratio: float = 0.8
     eval_ratio: float = 0.1
     test_ratio: float = 0.1
+    tokenizer_batch_size: int = 32
     rng_seed: int = 0 
     rng: np.random.Generator = field(init=False)
 
@@ -74,9 +77,11 @@ class Config:
         else:
             self.tree_sitter_parser = get_parser(self.source_files_language)
 
+
 def _normalize_extension(ext: str) -> str:
     ext = ext.strip().lower()
     return ext if ext.startswith(".") else f".{ext}"
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Preprocess code dataset for FIM fine-tuning.")
@@ -115,6 +120,7 @@ def parse_args() -> argparse.Namespace:
 
     return parser.parse_args()
 
+
 def _clear_existing_datasets(config: Config) -> None:
     dataset_files = [config.train_path, config.eval_path, config.test_path]
     
@@ -136,6 +142,7 @@ def _clear_existing_datasets(config: Config) -> None:
     else:
         exit()
 
+
 def _get_custom_tree_sitter_parser(tree_sitter_lib_path: Path, source_files_language: str) -> ts.Parser:
         lib = ctypes.CDLL(str(tree_sitter_lib_path)) # Load C Dynamic Link Library, makes all the public C functions inside the .dylib file available to be called from the Python script.
         entry_point_func_name = f"tree_sitter_{source_files_language}"
@@ -144,6 +151,7 @@ def _get_custom_tree_sitter_parser(tree_sitter_lib_path: Path, source_files_lang
         grammar_rules = ts.Language(lang_func()) # Call lang_func() function and wrap the returned raw C pointer into a tree-sitter Language object
         return ts.Parser(grammar_rules) 
         
+
 def _is_utf8_file(filepath: Path) -> bool:
     try:
         with open(filepath, 'rb') as f:
@@ -151,6 +159,7 @@ def _is_utf8_file(filepath: Path) -> bool:
         return True
     except UnicodeDecodeError:
         return False
+
 
 def auto_create_split_paths(config: Config) -> Tuple[list[Path], list[Path], list[Path]]:
     all_file_paths = []
@@ -177,19 +186,24 @@ def auto_create_split_paths(config: Config) -> Tuple[list[Path], list[Path], lis
 
     return train_file_paths, eval_file_paths, test_file_paths
 
-def _extract_code_blocks(config: Config, node: ts.Node, source_code_utf8: bytes) -> CodeBlocks:
-    code_blocks = []
 
+def _extract_code_blocks_rec(config: Config, node: ts.Node, source_code_utf8: bytes, max_depth: int) -> CodeBlocks:
+    """
+    Recursively extract code blocks (e.g. functions) that are used for FIM example generation later 
+    """
+    if max_depth <= 0:
+        return []
+    
+    code_blocks = []
     if node.type in config.block_types:
         code_utf8 = source_code_utf8[node.start_byte:node.end_byte]
-        code_block = (code_utf8, node)
-        code_blocks.append(code_block)
-
-    for child_node in node.children:
-        child_code_blocks = _extract_code_blocks(config, child_node, source_code_utf8)
-        code_blocks.extend(child_code_blocks)
-
+        code_blocks.append((code_utf8, node))
+    
+    for child in node.children:
+        child_blocks = _extract_code_blocks_rec(config, child, source_code_utf8, max_depth-1)
+        code_blocks.extend(child_blocks)  
     return code_blocks
+
 
 def _get_code_blocks_from_paths(config: Config, file_paths: list[Path]) -> Iterator[Tuple[bytes, ts.Node]]:
     """
@@ -218,17 +232,23 @@ def _get_code_blocks_from_paths(config: Config, file_paths: list[Path]) -> Itera
             continue
         root_node = tree.root_node
 
-        code_blocks = _extract_code_blocks(config, root_node, source_code_utf8)
-        config.rng.shuffle(code_blocks)
+        code_blocks = _extract_code_blocks_rec(config, root_node, source_code_utf8, max_depth=config.max_code_blocks_ast_depth)
+        config.rng.shuffle(code_blocks)  # shuffle code blocks extracted from a single file
         for block in code_blocks:
-            yield block  # Yields one block at the time 
+            yield block  # yields one block at the time 
+
 
 def get_code_blocks_from_auto_split(config: Config) -> Tuple[Iterator[Tuple[bytes, ts.Node]], Iterator[Tuple[bytes, ts.Node]], Iterator[Tuple[bytes, ts.Node]]]:
+    """
+    Auto-split source code files from /data into train/eval/test paths, then extract top-level 
+    code blocks such as functions from each split.
+    """
     train_file_paths, eval_file_paths, test_file_paths = auto_create_split_paths(config)
     train_code_blocks_iter = _get_code_blocks_from_paths(config, train_file_paths)
     eval_code_blocks_iter = _get_code_blocks_from_paths(config, eval_file_paths)  
     test_code_blocks_iter =  _get_code_blocks_from_paths(config, test_file_paths)
     return train_code_blocks_iter, eval_code_blocks_iter, test_code_blocks_iter 
+
 
 def _check_required_directories(root_path: Path, required_dirs: list[str]):
     missing_paths = []
@@ -243,6 +263,7 @@ def _check_required_directories(root_path: Path, required_dirs: list[str]):
             f"Required directories under {root_path}. "
             f"Missing directories: {', '.join(missing_paths)}"
         )
+
     
 def _get_filtered_paths(config: Config, directory: Path) -> list[Path]:
     filtered_paths = []
@@ -254,7 +275,11 @@ def _get_filtered_paths(config: Config, directory: Path) -> list[Path]:
 
     return filtered_paths
 
+
 def get_code_blocks_from_manual_split(config: Config) -> Tuple[Iterator[Tuple[bytes, ts.Node]], Iterator[Tuple[bytes, ts.Node]], Iterator[Tuple[bytes, ts.Node]]]:
+    """
+    Extract top-level code blocks such as functions from manually split train/eval/test files.
+    """
     _check_required_directories(config.raw_data_path, ["train", "eval", "test"])
     train_file_paths = _get_filtered_paths(config, config.raw_data_path / "train")
     eval_file_paths  = _get_filtered_paths(config, config.raw_data_path / "eval")
@@ -264,6 +289,7 @@ def get_code_blocks_from_manual_split(config: Config) -> Tuple[Iterator[Tuple[by
     eval_code_blocks_iter = _get_code_blocks_from_paths(config, eval_file_paths) 
     test_code_blocks_iter = _get_code_blocks_from_paths(config, test_file_paths) 
     return train_code_blocks_iter, eval_code_blocks_iter, test_code_blocks_iter
+
 
 def _extract_subblock_ranges(config: Config, node: ts.Node, base_offset: int) -> list[Tuple[int, int]]:
     """
@@ -285,56 +311,89 @@ def _extract_subblock_ranges(config: Config, node: ts.Node, base_offset: int) ->
         
     return subblock_ranges
 
-def _filter_subblocks(subblock_ranges: list[Tuple[int, int]], max_bytes: int) -> list[Tuple[int, int]]:
+
+def _filter_subblocks(subblock_ranges: list[Tuple[int, int]], max_bytes_per_subblock: int) -> list[Tuple[int, int]]:
     """
-     Discard subblocks that have a larger end index than max_bytes
+     Discard subblocks that have a larger end index than max_bytes_per_subblock
     """
     subblock_ranges = sorted(subblock_ranges, key=lambda x: x[1]) # Sort ranges by end index
     i = 0
-    while i < len(subblock_ranges) and subblock_ranges[i][1] <= max_bytes:
+    while i < len(subblock_ranges) and subblock_ranges[i][1] <= max_bytes_per_subblock:
         i += 1
     return subblock_ranges[:i]
 
-def _generate_fim_examples_from_code_block(config: Config, code_utf8: bytes, subblock_ranges: list[Tuple[int, int]]) -> list[bytes]:
+
+def _estimate_bytes_per_token_ratio(config: Config, tokenizer: AutoTokenizer, number_of_code_blocks: int) -> float:
+    """
+    Estimate bytes per token ratio from first `number_of_code_blocks` code blocks in training split.
+    Always uses auto-split (ignores config.split_mode). 
+    Source code is almost entirely ASCII characters (1 char = 1 byte) 
+    except e.g. specific string literals (printf("π ≈ 3.14159\n");). 
+    ASCII is a subset of UTF-8, so len(bytes) ≈ character count.
+    """
+    train_file_paths, _, _ = auto_create_split_paths(config)  # No matter the split mode always use the auto split
+    total_bytes = 0
+    total_tokens = 0
+    i = 0
+    block_iter = _get_code_blocks_from_paths(config, train_file_paths)
+    for block in block_iter:
+        total_bytes += len(block[0])  # bytes from code block
+        tokenized_block = tokenizer(block[0].decode('utf-8')).tokens()
+        total_tokens += len(tokenized_block)
+        i += 1
+        if i >= number_of_code_blocks:
+            break
+    
+    if total_tokens <= 0 or total_bytes <= 0:
+        raise ValueError("Failed to estimate bytes per token ratio")
+    bytes_per_token_ratio = total_bytes / total_tokens 
+    return bytes_per_token_ratio 
+
+
+def _generate_fim_examples_from_code_block(config: Config, code_utf8: bytes, subblock_ranges: list[Tuple[int, int]], bytes_per_token_ratio: int) -> list[bytes]:
     fim_prefix_token_utf8 = config.fim_prefix_token.encode('utf8')
     fim_middle_token_utf8 = config.fim_middle_token.encode('utf8')
     fim_suffix_token_utf8 = config.fim_suffix_token.encode('utf8')
-
+    eos_token_utf8 = config.eos_token.encode('utf8')
+    
     num_of_subblocks = len(subblock_ranges)
     num_of_fim_examples = 0
-    if (config.fim_examples_per_subblock_ratio >= 1):
-        num_of_fim_examples = num_of_subblocks
-    else:
-        num_of_fim_examples = max(1, int(num_of_subblocks * config.fim_examples_per_subblock_ratio)) # Make sure to always generate at least one fim example
-    unique_random_indices = config.rng.choice(len(subblock_ranges), size=num_of_fim_examples, replace=False)
+    num_of_fim_examples = max(1, int(num_of_subblocks * config.fim_examples_per_subblock_ratio))  # make sure to always generate at least one fim example
+    unique_random_subblock_indices = config.rng.choice(len(subblock_ranges), size=num_of_fim_examples, replace=False)
 
     fim_examples = [] 
 
-    for idx in unique_random_indices:
-        middle_start = subblock_ranges[idx][0]
-        middle_end = subblock_ranges[idx][1]
+    for idx in unique_random_subblock_indices:
+        middle_start_byte = subblock_ranges[idx][0]
+        middle_end_byte = subblock_ranges[idx][1]
+        middle_bytes_length = middle_end_byte - middle_start_byte
+        middle_tokens_length = middle_bytes_length / bytes_per_token_ratio
+        # Allow only examples within a certain range
+        if (middle_tokens_length < config.min_middle_tokens_length) or (middle_tokens_length > config.max_middle_tokens_length):
+            continue
 
-        prefix = code_utf8[:middle_start]
-        middle = code_utf8[middle_start:middle_end]
-        suffix = code_utf8[middle_end:]
+        prefix = code_utf8[:middle_start_byte]
+        middle = code_utf8[middle_start_byte:middle_end_byte]
+        suffix = code_utf8[middle_end_byte:]
 
         fim_example = (
             fim_prefix_token_utf8 + prefix +
             fim_suffix_token_utf8 + suffix +
-            fim_middle_token_utf8 + middle
+            fim_middle_token_utf8 + middle +
+            eos_token_utf8
         )
 
         fim_examples.append(fim_example)
 
     return fim_examples
 
-def create_fim_examples(config: Config, code_blocks_iter: Iterator[Tuple[bytes, ts.Node]]) -> Iterator[bytes]:
+
+def create_fim_examples(config: Config, code_blocks_iter: Iterator[Tuple[bytes, ts.Node]], bytes_per_token_ratio: int) -> Iterator[bytes]:
     """
     Generator function that takes a generator iterator of code blocks as input, 
     generates FIM examples from each code block and returns a generator iterator 
-    over all created FIM examples.
+    over all created FIM examples. 
     """
-
     for code_block_utf8, node in code_blocks_iter:
         base_offset = node.start_byte
         subblock_ranges = _extract_subblock_ranges(config, node, base_offset)
@@ -342,11 +401,13 @@ def create_fim_examples(config: Config, code_blocks_iter: Iterator[Tuple[bytes, 
         if not subblock_ranges:
             continue 
 
-        subblock_ranges = _filter_subblocks(subblock_ranges, config.bytes_per_code_block ) 
-        
-        code_block_utf8 = code_block_utf8[:config.bytes_per_code_block]  # Trunctate code block code if it is larger than bytes_per_code_block, we only consider subblocks inside this range
+        max_bytes_per_subblock = int(config.max_token_sequence_length * bytes_per_token_ratio)
 
-        fim_examples = _generate_fim_examples_from_code_block(config, code_block_utf8, subblock_ranges)
+        subblock_ranges = _filter_subblocks(subblock_ranges, max_bytes_per_subblock) 
+        
+        code_block_utf8 = code_block_utf8[:max_bytes_per_subblock]  # Trunctate code block code if it is larger than bytes_per_code_block, we only consider subblocks inside this range
+
+        fim_examples = _generate_fim_examples_from_code_block(config, code_block_utf8, subblock_ranges, bytes_per_token_ratio)
         for fim_example in fim_examples:
             yield fim_example
 
@@ -356,6 +417,7 @@ def _find_first_token_idx(sequence: List[int], token_id: int) -> int:
         if token == token_id:
             return idx
     return -1
+
 
 def _mask_labels(config: Config, input_ids: List[List[int]], tokenizer: AutoTokenizer) -> List[List[int]]:
     fim_middle_token_id = tokenizer.convert_tokens_to_ids(config.fim_middle_token)
@@ -379,6 +441,7 @@ def _mask_labels(config: Config, input_ids: List[List[int]], tokenizer: AutoToke
 
     return labels
 
+
 def _save_tokenized_batch_as_jsonl(file_path: Path, batch: Mapping[str, List[List[int]]]):
     file_path.parent.mkdir(parents=True, exist_ok=True)     # Ensure file parent directories exist
 
@@ -396,6 +459,7 @@ def _save_tokenized_batch_as_jsonl(file_path: Path, batch: Mapping[str, List[Lis
             }
             f.write(json.dumps(example, ensure_ascii=False) + '\n')  # Ensre utf8 encoding
 
+
 def tokenize_and_save_fim_examples(config: Config, file_path: Path, fim_examples_iter: Iterator[bytes], tokenizer: AutoTokenizer): 
     batch = []
 
@@ -411,7 +475,7 @@ def tokenize_and_save_fim_examples(config: Config, file_path: Path, fim_examples
             tokenized_batch["labels"] = _mask_labels(config, tokenized_batch["input_ids"], tokenizer)
             _save_tokenized_batch_as_jsonl(file_path, tokenized_batch)
             batch = []
-    # last batch only
+    # last batch is smaller than config.tokenizer_batch_size, the "rest"
     if batch:
         tokenized_batch = tokenizer(
             batch,
@@ -421,6 +485,7 @@ def tokenize_and_save_fim_examples(config: Config, file_path: Path, fim_examples
         )
         tokenized_batch["labels"] = _mask_labels(config, tokenized_batch["input_ids"], tokenizer)
         _save_tokenized_batch_as_jsonl(file_path, tokenized_batch)
+
 
 def main():
     user_args = parse_args()
@@ -446,9 +511,12 @@ def main():
     else:
         raise ValueError(f"Unknown split mode: {user_args.split_mode}") 
 
-    train_fim_examples_iter= create_fim_examples(config, train_code_blocks_iter)
-    eval_fim_examples_iter = create_fim_examples(config, eval_code_blocks_iter)
-    test_fim_examples_iter = create_fim_examples(config, test_code_blocks_iter)
+    bytes_per_token_ratio = _estimate_bytes_per_token_ratio(config, tokenizer, number_of_code_blocks=400)
+    print(f"***********{bytes_per_token_ratio}")
+
+    train_fim_examples_iter= create_fim_examples(config, train_code_blocks_iter, bytes_per_token_ratio)
+    eval_fim_examples_iter = create_fim_examples(config, eval_code_blocks_iter, bytes_per_token_ratio)
+    test_fim_examples_iter = create_fim_examples(config, test_code_blocks_iter, bytes_per_token_ratio)
     
     tokenize_and_save_fim_examples(config, config.train_path, train_fim_examples_iter, tokenizer)
     tokenize_and_save_fim_examples(config, config.eval_path, eval_fim_examples_iter, tokenizer)
