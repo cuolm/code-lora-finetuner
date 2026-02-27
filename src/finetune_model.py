@@ -4,6 +4,7 @@ import math
 import shutil
 import sys        
 import gc
+import logging.config
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Tuple, Dict
@@ -13,6 +14,7 @@ import torch
 from datasets import Features, Sequence, Value, IterableDataset, load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModel
+
 
 @dataclass
 class Config:
@@ -33,15 +35,26 @@ class Config:
     ])
     trainer_num_train_epochs: int = 1 
     trainer_per_device_train_batch_size: int = 2 
-    trainer_per_device_eval_batch_size: int = 4 
-    trainer_gradient_accumulation_steps: int = 16 # Number of forward/backward passes to accumulate before performing one optimizer step.
+    trainer_per_device_eval_batch_size: int = 2 
+    trainer_gradient_accumulation_steps: int = 32 # Number of forward/backward passes to accumulate before performing one optimizer step.
     trainer_max_steps: int = field(init=False)
     trainer_learning_rate: float = 2e-5
+    trainer_weight_decay: float = 0.1
+    trainer_max_grad_norm: int = 1
+    trainer_lr_scheduler_type: str = "cosine"
+    trainer_warmup_steps: int = 50
+    trainer_log_level: str = "info"
     trainer_logging_steps: int = 10   # Average training loss over trainer_logging_steps period is calculated and logged.
     trainer_eval_strategy: str = "steps"
     trainer_eval_steps: int = 100 
     trainer_save_steps: int = 100 
+    trainer_logging_strategy: str = "steps"
+    trainer_save_strategy: str = "steps"
+    trainer_bf16: bool = True   # If set to True fp16 needs to be set to false 
+    trainer_fp16: bool = False  # If set to True bf16 needs to be set to False
+    trainer_gradient_checkpointing: bool = True
 
+    collator_label_pad_token_id: int = -100
     train_dataset_length: int = field(init=False) 
     device: str = field(init=False) 
     shuffle_buffer_size: int = 50000 
@@ -83,7 +96,35 @@ class Config:
                                 (self.trainer_per_device_train_batch_size * self.trainer_gradient_accumulation_steps)
                                 ) * self.trainer_num_train_epochs
 
-def parse_args(config: Config) -> argparse.Namespace:
+
+logger = logging.getLogger(__name__)
+
+def _setup_logger(log_level: str) -> None:
+    config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "standard": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            }
+        },
+        "handlers": {
+            "stderr_handler": {
+                "level": log_level,
+                "class": "logging.StreamHandler",
+                "formatter": "standard",
+            }
+        },
+        "root": {
+            "handlers": ["stderr_handler"],
+            "level": log_level,
+            "propagate": True
+        }
+    }
+    logging.config.dictConfig(config)
+
+
+def _parse_args(config: Config) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Start or resume LoRA model training")
     parser.add_argument("--resume",
                         type=str, 
@@ -95,26 +136,27 @@ def parse_args(config: Config) -> argparse.Namespace:
     if user_args.resume:
         answer = input(f"You passed --resume='{user_args.resume}'. Do you want to resume training from this checkpoint? (y/N): ").strip().lower()
         if answer not in ["y", "yes"]:
-            print("Aborting. To start fresh training, run the script without --resume.")
+            logger.info("Aborting. To start fresh training, run the script without --resume.")
             sys.exit(0)
     
     else:
         train_fresh = input("Do you really want to start training from scratch? (y/N): ").strip().lower()
         if train_fresh not in ["y", "yes"]:
-            print("Aborting fresh training run.")
+            logger.info("Aborting fresh training run.")
             sys.exit(0) 
         
         answer = input(f"No --resume argument passed. Do you want to delete the entire '{config.trainer_output_dir_path}' folder and recreate it empty? (y/N): ").strip().lower()
         if answer in ["y", "yes"]:
             if config.trainer_output_dir_path.exists():
-                print(f"Deleting {config.trainer_output_dir_path} folder and all its contents...")
+                logger.info(f"Deleting {config.trainer_output_dir_path} folder and all its contents...")
                 shutil.rmtree(config.trainer_output_dir_path)
             config.trainer_output_dir_path.mkdir(parents=True, exist_ok=True)
-            print(f"Recreated empty {config.trainer_output_dir_path} folder.")
+            logger.info(f"Recreated empty {config.trainer_output_dir_path} folder.")
         
     return user_args
 
-def load_datasets(config: Config) -> Tuple[IterableDataset, IterableDataset, IterableDataset]:
+
+def load_datasets(config: Config) -> Tuple[IterableDataset, IterableDataset]:
     # Define the expected schema/features of datasets.
     # Use 'int32' which the datasets library and pytorch map correctly to int tensors.
     dataset_features = Features({
@@ -127,43 +169,47 @@ def load_datasets(config: Config) -> Tuple[IterableDataset, IterableDataset, Ite
     # This allows processing data samples on-the-fly without downloading or loading the entire dataset into memory.
     # https://huggingface.co/docs/datasets/stream
     train_dataset = load_dataset("json", data_files=str(config.train_dataset_path), features=dataset_features, streaming=True)["train"]
-    train_dataset = train_dataset.shuffle(buffer_size=config.shuffle_buffer_size, seed=config.shuffle_seed) # Take up to suffle_buffer_size examples and randomly shuffle them
+    train_dataset = train_dataset.shuffle(buffer_size=config.shuffle_buffer_size, seed=config.shuffle_seed) # take up to suffle_buffer_size examples and randomly shuffle them
     eval_dataset = load_dataset("json", data_files=str(config.eval_dataset_path), features=dataset_features, streaming=True)["train"]
     return train_dataset, eval_dataset 
 
-def load_and_configure_lora_model(config: Config) -> AutoModelForCausalLM:
-    lora_config = LoraConfig(
-        r=config.lora_r, 
-        lora_alpha=config.lora_alpha, 
-        lora_dropout=config.lora_dropout, 
-        bias=config.lora_bias, 
-        target_modules=config.lora_target_modules,
-    )
 
+def load_and_configure_lora_model(config: Config) -> AutoModelForCausalLM:
     if config.device == "cuda":
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
+            bnb_4bit_quant_type="nf4",  # quantization type fp4 or nf4"
+            bnb_4bit_compute_type=torch.bfloat16,
             bnb_4bit_use_double_quant=True,
         )
         model = AutoModelForCausalLM.from_pretrained(
             pretrained_model_name_or_path=config.model_name,
+            #attn_implementation="sdpa", # built-in PyTorch implementation of scaled dot product attention
             quantization_config=bnb_config,
-            device_map="auto" # Let bitsandbytes handle placement
+            device_map="auto" # let bitsandbytes handle placement
         )
         model = prepare_model_for_kbit_training(model)
     elif config.device == "mps":
         model = AutoModelForCausalLM.from_pretrained(
             pretrained_model_name_or_path=config.model_name,
-            torch_dtype=torch.float16  # Reduces weights from 32-bit to 16-bit float.
+            torch_dtype=torch.float16  # reduces weights from 32-bit to 16-bit float.
         ).to("mps")
     else:
         model = AutoModelForCausalLM.from_pretrained(
             pretrained_model_name_or_path=config.model_name,
         ).to("cpu")
 
+    lora_config = LoraConfig(
+        lora_alpha=config.lora_alpha, 
+        lora_dropout=config.lora_dropout, 
+        r=config.lora_r, 
+        bias=config.lora_bias, 
+        task_type="CAUSAL_LM",
+        target_modules=config.lora_target_modules,
+    )
     lora_model = get_peft_model(model, lora_config)
     return lora_model
+
 
 class FIMDataCollator:
     def __init__(self, tokenizer, label_pad_token_id):
@@ -171,27 +217,32 @@ class FIMDataCollator:
         self.label_pad_token_id = label_pad_token_id 
 
     def __call__(self, examples: List[Dict[str, List[int]]]) -> Dict[str, torch.Tensor]:
-        # Initialize max length for this specific batch
+        # Find max length for this specific batch.
         max_ex_length = 0 
         for ex in examples:
             if len(ex["input_ids"]) > max_ex_length:
                 max_ex_length = len(ex["input_ids"])
         
-        # Apply padding using the saved tokenizer
+        # Apply padding. 
+        padded_examples = [] 
         for ex in examples:
             pad_length = max_ex_length - len(ex["input_ids"])
-            ex["input_ids"] += [self.tokenizer.pad_token_id] * pad_length
-            ex["attention_mask"] += [0] * pad_length
-            ex["labels"] += [self.label_pad_token_id] * pad_length
+            padded_ex = {  
+                "input_ids": (ex["input_ids"] + [self.tokenizer.pad_token_id] * pad_length),  
+                "attention_mask": (ex["attention_mask"] + [0] * pad_length),  
+                "labels": (ex["labels"] + [self.label_pad_token_id] * pad_length)  
+            }  
+            padded_examples.append(padded_ex)
 
-        # Stack separate examples into a single tensors matrix
+        # Stack separate examples into a single tensors matrix.
         examples_batch = {
-            "input_ids": torch.tensor([ex["input_ids"] for ex in examples], dtype=torch.long),
-            "attention_mask": torch.tensor([ex["attention_mask"] for ex in examples], dtype=torch.long),
-            "labels": torch.tensor([ex["labels"] for ex in examples], dtype=torch.long)
+            "input_ids": torch.tensor([ex["input_ids"] for ex in padded_examples], dtype=torch.long),
+            "attention_mask": torch.tensor([ex["attention_mask"] for ex in padded_examples], dtype=torch.long),
+            "labels": torch.tensor([ex["labels"] for ex in padded_examples], dtype=torch.long)
         }
 
         return examples_batch
+
 
 def train_and_save_lora_model(
         config: Config,
@@ -199,7 +250,9 @@ def train_and_save_lora_model(
         train_dataset: IterableDataset,
         eval_dataset: IterableDataset,
         user_args: argparse.Namespace
-) -> List:  
+) -> List: 
+    logger.info(f"Starting training: {config.trainer_max_steps} steps on {config.device}, batch_size={config.trainer_per_device_train_batch_size}") 
+
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     tokenizer.pad_token = config.fim_pad_token
     tokenizer.padding_side = "right"
@@ -208,20 +261,28 @@ def train_and_save_lora_model(
         output_dir=config.trainer_output_dir_path,
         per_device_train_batch_size=config.trainer_per_device_train_batch_size,
         per_device_eval_batch_size=config.trainer_per_device_eval_batch_size,
-        gradient_accumulation_steps=config.trainer_gradient_accumulation_steps, # Simulate a batch size of 4 but only load 1 example at a time in memory.
-        logging_steps=config.trainer_logging_steps,
-        eval_strategy=config.trainer_eval_strategy,
-        eval_steps=config.trainer_eval_steps,
-        save_steps=config.trainer_save_steps,
-        max_steps=config.trainer_max_steps,
+        gradient_accumulation_steps=config.trainer_gradient_accumulation_steps, # simulate a batch size of 4 but only load 1 example at a time in memory.
         learning_rate=config.trainer_learning_rate,
-        fp16=True,  # Enables 16bit precision for the training loop
-        gradient_checkpointing=True
+        weight_decay=config.trainer_weight_decay,
+        max_grad_norm=config.trainer_max_grad_norm,
+        max_steps=config.trainer_max_steps,
+        lr_scheduler_type=config.trainer_lr_scheduler_type,
+        warmup_steps=config.trainer_warmup_steps,
+        log_level=config.trainer_log_level,
+        eval_strategy=config.trainer_eval_strategy,
+        logging_steps=config.trainer_logging_steps,
+        eval_steps=config.trainer_eval_steps,
+        logging_strategy=config.trainer_logging_strategy,
+        save_strategy=config.trainer_save_strategy,
+        save_steps=config.trainer_save_steps,
+        bf16=config.trainer_bf16,  # if set to True fp16 needs to be set to false 
+        fp16=config.trainer_fp16,  # if set to True bf16 needs to be set to False
+        gradient_checkpointing=config.trainer_gradient_checkpointing
     )
 
     data_collator = FIMDataCollator(
         tokenizer=tokenizer,
-        label_pad_token_id=-100
+        label_pad_token_id=config.collator_label_pad_token_id
     )
     
     trainer = Trainer(
@@ -236,30 +297,30 @@ def train_and_save_lora_model(
     if user_args.resume == "last":
         trainer.train(resume_from_checkpoint=True)
     elif user_args.resume is not None:
-        trainer.train(resume_from_checkpoint=user_args.resume)  # specific checkpoint provided 
+        trainer.train(resume_from_checkpoint=user_args.resume) 
     else:
         trainer.train() # train from scratch
 
-    lora_model.save_pretrained(config.lora_adapter_path) # Save lora adapter only
+    lora_model.save_pretrained(config.lora_adapter_path) # save lora adapter only
     log_history = trainer.state.log_history
 
     if config.device == "cuda":
-        # Clear 4-bit model from VRAM to make room for the FP16 base model
+        # Clear 4-bit model from VRAM to make room for the FP16 base model.
         if 'trainer' in locals():
-            del trainer  # Clear trainer references
+            del trainer  # clear trainer references
 
-        del lora_model  # Remove model reference
+        del lora_model  # remove model reference
 
-        gc.collect()  # Force garbage collection
+        gc.collect()  # force garbage collection
 
         if torch.cuda.is_available():
-            torch.cuda.synchronize()  # Wait for gpu
-            torch.cuda.empty_cache()  # Clear gpu cache
+            torch.cuda.synchronize()  # wait for gpu
+            torch.cuda.empty_cache()  # clear gpu cache
         
-        # Ensure offload folder for merging exists before loading the model
+        # Ensure offload folder for merging exists before loading the model.
         config.model_merge_offload_folder_path.mkdir(parents=True, exist_ok=True)
 
-        # Load fresh FP16 base model
+        # Load fresh FP16 base model.
         base_model = AutoModelForCausalLM.from_pretrained(
             pretrained_model_name_or_path=config.model_name,
             dtype=torch.float16,
@@ -274,17 +335,18 @@ def train_and_save_lora_model(
             offload_folder=str(config.model_merge_offload_folder_path)
         )
 
-    # Merge lora adapter into base model and save it with the tokenizer of the model
+    # Merge lora adapter into base model and save it with the tokenizer of the model.
     merged_model= lora_model.merge_and_unload() 
     merged_model = merged_model.to(torch.float16) 
     merged_model.save_pretrained(config.lora_model_path)
     tokenizer.save_pretrained(config.lora_model_path)
 
-    # Clean up offload folder
+    # Clean up offload folder.
     if config.model_merge_offload_folder_path.exists():
         shutil.rmtree(config.model_merge_offload_folder_path)
 
     return log_history 
+
 
 def save_log(config: Config, log_history: List) -> None:
     history = {
@@ -310,6 +372,7 @@ def save_log(config: Config, log_history: List) -> None:
     with log_path.open("w", encoding="utf-8") as f:
         json.dump(history, f, indent=2)
 
+
 def plot_loss(config: Config) -> None:
     losses_path = Path(config.trainer_output_dir_path) / "training_log.json"
     with losses_path.open("r", encoding="utf-8") as f:
@@ -331,17 +394,22 @@ def plot_loss(config: Config) -> None:
     plt.savefig(Path(config.trainer_output_dir_path) / "loss_plot.png")
     plt.show()
 
-def main():
+
+def main() -> None:
     config = Config()
-    user_args = parse_args(config)
+    _setup_logger("INFO")
+    user_args = _parse_args(config)
     train_dataset, eval_dataset= load_datasets(config)
+    logger.info(f"Dataset: {config.train_dataset_length} train examples, max_steps={config.trainer_max_steps}")
 
     lora_model = load_and_configure_lora_model(config)
     lora_model.print_trainable_parameters()
+
     log_history = train_and_save_lora_model(config, lora_model, train_dataset, eval_dataset, user_args)
     save_log(config, log_history)
 
     plot_loss(config)
+
 
 if __name__ == "__main__":
     main()

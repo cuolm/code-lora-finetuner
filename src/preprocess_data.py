@@ -1,6 +1,7 @@
 import json
 import argparse
 import ctypes
+import logging.config
 
 from pathlib import Path
 from typing import Iterator, Tuple, Mapping, List
@@ -23,8 +24,8 @@ class Config:
     eos_token: str = "<|endoftext|>"
     max_token_sequence_length: int = 1024  # used with estimated bytes_per_token_ratio to convert bytes to tokens, final token count is thus not exact
     max_code_blocks_ast_depth: int = 2  # depth 1 is root, 2 includes child nodes (e.g. functions)
-    min_middle_tokens_length: int = 10  # used with estimated bytes_per_token_ratio to convert bytes to tokens, final token count is thus not exact
-    max_middle_tokens_length: int = max_token_sequence_length  # used with estimated bytes_per_token_ratio to convert bytes to tokens, final token count is thus not exact
+    min_middle_tokens_length: int = 20  # used with estimated bytes_per_token_ratio to convert bytes to tokens, final token count is thus not exact
+    max_middle_tokens_length: int = 200  # used with estimated bytes_per_token_ratio to convert bytes to tokens, final token count is thus not exact
     fim_examples_per_subblock_ratio: float = 1.0  # 1.0 = all fim examples of a subblock are extracted, 0.5 = onls 50% of fim examples of a subblock are extracted 
     train_ratio: float = 0.8
     eval_ratio: float = 0.1
@@ -78,12 +79,39 @@ class Config:
             self.tree_sitter_parser = get_parser(self.source_files_language)
 
 
+logger = logging.getLogger(__name__)
+
+def _setup_logger(log_level: str) -> None:
+    config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "standard": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            }
+        },
+        "handlers": {
+            "stderr_handler": {
+                "level": log_level,
+                "class": "logging.StreamHandler",
+                "formatter": "standard",
+            }
+        },
+        "root": {
+            "handlers": ["stderr_handler"],
+            "level": log_level,
+            "propagate": True
+        }
+    }
+    logging.config.dictConfig(config)
+
+
 def _normalize_extension(ext: str) -> str:
     ext = ext.strip().lower()
     return ext if ext.startswith(".") else f".{ext}"
 
 
-def parse_args() -> argparse.Namespace:
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Preprocess code dataset for FIM fine-tuning.")
     parser.add_argument(
         "--extensions",
@@ -125,8 +153,9 @@ def _clear_existing_datasets(config: Config) -> None:
     dataset_files = [config.train_path, config.eval_path, config.test_path]
     
     found_existing = False
-    for f in dataset_files:
-        if f.exists():
+    for file in dataset_files:
+        if file.exists():
+            logger.info(f"Found existing dataset: {file}")
             found_existing = True
 
     if not found_existing:
@@ -138,8 +167,9 @@ def _clear_existing_datasets(config: Config) -> None:
         for f in dataset_files:
             if f.exists():
                 f.unlink()
-        print("Old data deleted.")
+        logger.info("Deleted existing datasets.")
     else:
+        logger.info("Aborted by user. Existing datasets preserved.")
         exit()
 
 
@@ -161,7 +191,7 @@ def _is_utf8_file(filepath: Path) -> bool:
         return False
 
 
-def auto_create_split_paths(config: Config) -> Tuple[list[Path], list[Path], list[Path]]:
+def _auto_create_split_paths(config: Config) -> Tuple[list[Path], list[Path], list[Path]]:
     all_file_paths = []
     for filepath in config.raw_data_path.rglob("*"):
         if not (
@@ -175,6 +205,9 @@ def auto_create_split_paths(config: Config) -> Tuple[list[Path], list[Path], lis
     config.rng.shuffle(all_file_paths)
 
     num_files = len(all_file_paths)
+    if num_files == 0:
+        logger.warning(f"No source files found under {config.raw_data_path} with extensions {config.extensions}")
+
     train_end = int(num_files * config.train_ratio)
     eval_end = train_end + int(num_files * config.eval_ratio)
 
@@ -182,7 +215,7 @@ def auto_create_split_paths(config: Config) -> Tuple[list[Path], list[Path], lis
     eval_file_paths = all_file_paths[train_end:eval_end]
     test_file_paths = all_file_paths[eval_end:]
 
-    print(f"Split {num_files} files into {len(train_file_paths)} train, {len(eval_file_paths)} eval, and {len(test_file_paths)} test files.")
+    logger.info(f"Split {num_files} files into {len(train_file_paths)} train, {len(eval_file_paths)} eval, and {len(test_file_paths)} test files.")
 
     return train_file_paths, eval_file_paths, test_file_paths
 
@@ -221,14 +254,14 @@ def _get_code_blocks_from_paths(config: Config, file_paths: list[Path]) -> Itera
         try:
             source_code_unicode = path.read_text(encoding='utf8')
         except UnicodeDecodeError:
-            print(f"Skipping file '{path}': Not a valid UTF-8 file.")
+            logger.exception(f"Skipping file '{path}': Not a valid UTF-8 file.")
             continue
 
         source_code_utf8 = source_code_unicode.encode('utf8')
         try:
             tree = config.tree_sitter_parser.parse(source_code_utf8)
         except Exception as exc:
-            print(f"Skipping file '{path}': failed to parse with tree-sitter: {exc}")
+            logger.exception(f"Skipping file '{path}': failed to parse with tree-sitter: {exc}")
             continue
         root_node = tree.root_node
 
@@ -243,14 +276,14 @@ def get_code_blocks_from_auto_split(config: Config) -> Tuple[Iterator[Tuple[byte
     Auto-split source code files from /data into train/eval/test paths, then extract top-level 
     code blocks such as functions from each split.
     """
-    train_file_paths, eval_file_paths, test_file_paths = auto_create_split_paths(config)
+    train_file_paths, eval_file_paths, test_file_paths = _auto_create_split_paths(config)
     train_code_blocks_iter = _get_code_blocks_from_paths(config, train_file_paths)
     eval_code_blocks_iter = _get_code_blocks_from_paths(config, eval_file_paths)  
     test_code_blocks_iter =  _get_code_blocks_from_paths(config, test_file_paths)
     return train_code_blocks_iter, eval_code_blocks_iter, test_code_blocks_iter 
 
 
-def _check_required_directories(root_path: Path, required_dirs: list[str]):
+def _check_required_directories(root_path: Path, required_dirs: list[str]) -> None:
     missing_paths = []
     for dir_name in required_dirs:
         dir_path = root_path / dir_name
@@ -316,7 +349,7 @@ def _filter_subblocks(subblock_ranges: list[Tuple[int, int]], max_bytes_per_subb
     """
      Discard subblocks that have a larger end index than max_bytes_per_subblock
     """
-    subblock_ranges = sorted(subblock_ranges, key=lambda x: x[1]) # Sort ranges by end index
+    subblock_ranges = sorted(subblock_ranges, key=lambda x: x[1]) # sort ranges by end index
     i = 0
     while i < len(subblock_ranges) and subblock_ranges[i][1] <= max_bytes_per_subblock:
         i += 1
@@ -331,7 +364,7 @@ def _estimate_bytes_per_token_ratio(config: Config, tokenizer: AutoTokenizer, nu
     except e.g. specific string literals (printf("π ≈ 3.14159\n");). 
     ASCII is a subset of UTF-8, so len(bytes) ≈ character count.
     """
-    train_file_paths, _, _ = auto_create_split_paths(config)  # No matter the split mode always use the auto split
+    train_file_paths, _, _ = _auto_create_split_paths(config)  # no matter the split mode always use the auto split
     total_bytes = 0
     total_tokens = 0
     i = 0
@@ -405,7 +438,7 @@ def create_fim_examples(config: Config, code_blocks_iter: Iterator[Tuple[bytes, 
 
         subblock_ranges = _filter_subblocks(subblock_ranges, max_bytes_per_subblock) 
         
-        code_block_utf8 = code_block_utf8[:max_bytes_per_subblock]  # Trunctate code block code if it is larger than bytes_per_code_block, we only consider subblocks inside this range
+        code_block_utf8 = code_block_utf8[:max_bytes_per_subblock]  # Trunctate code block code if it is larger than bytes_per_code_block, we only consider subblocks inside this range.
 
         fim_examples = _generate_fim_examples_from_code_block(config, code_block_utf8, subblock_ranges, bytes_per_token_ratio)
         for fim_example in fim_examples:
@@ -426,15 +459,15 @@ def _mask_labels(config: Config, input_ids: List[List[int]], tokenizer: AutoToke
     labels = []
 
     for idx, sequence in enumerate(input_ids):
-        sequence_labels = [-100] * len(sequence)  # Initialize labels with -100 (pytorchignore index)
+        sequence_labels = [-100] * len(sequence)  # initialize labels with -100 (pytorchignore index)
 
         middle_token_idx = _find_first_token_idx(sequence, fim_middle_token_id)
         if middle_token_idx == -1:
-            continue # Middle token not found, skip to next sequence
+            continue  # middle token not found, skip to next sequence
 
         middle_start_idx = middle_token_idx + 1
 
-        # Copy tokens after the middle token to labels
+        # copy tokens after the middle token to labels
         for j in range(middle_start_idx, len(sequence)):
             sequence_labels[j] = sequence[j]
         labels.append(sequence_labels)
@@ -442,8 +475,8 @@ def _mask_labels(config: Config, input_ids: List[List[int]], tokenizer: AutoToke
     return labels
 
 
-def _save_tokenized_batch_as_jsonl(file_path: Path, batch: Mapping[str, List[List[int]]]):
-    file_path.parent.mkdir(parents=True, exist_ok=True)     # Ensure file parent directories exist
+def _save_tokenized_batch_as_jsonl(file_path: Path, batch: Mapping[str, List[List[int]]]) -> None:
+    file_path.parent.mkdir(parents=True, exist_ok=True)  # ensure file parent directories exist
 
     with open(file_path, 'a', encoding='utf-8') as f:
         batch_size = len(batch['input_ids'])
@@ -457,14 +490,15 @@ def _save_tokenized_batch_as_jsonl(file_path: Path, batch: Mapping[str, List[Lis
                 'attention_mask': attention_mask,
                 'labels': labels
             }
-            f.write(json.dumps(example, ensure_ascii=False) + '\n')  # Ensre utf8 encoding
+            f.write(json.dumps(example, ensure_ascii=False) + '\n')  # ensre utf8 encoding
 
 
-def tokenize_and_save_fim_examples(config: Config, file_path: Path, fim_examples_iter: Iterator[bytes], tokenizer: AutoTokenizer): 
+def tokenize_and_save_fim_examples(config: Config, file_path: Path, fim_examples_iter: Iterator[bytes], tokenizer: AutoTokenizer) -> None: 
+    examples_counter = 0
     batch = []
-
     for fim_example in fim_examples_iter:
         batch.append(fim_example.decode('utf-8'))
+        examples_counter += 1
         if (len(batch) == config.tokenizer_batch_size):
             tokenized_batch = tokenizer(
                 batch,
@@ -472,9 +506,11 @@ def tokenize_and_save_fim_examples(config: Config, file_path: Path, fim_examples
                 return_tensors=None,
                 return_attention_mask=True
             )
-            tokenized_batch["labels"] = _mask_labels(config, tokenized_batch["input_ids"], tokenizer)
+            # tokenized_batch["labels"] = _mask_labels(config, tokenized_batch["input_ids"], tokenizer)
+            tokenized_batch["labels"] = tokenized_batch["input_ids"]
             _save_tokenized_batch_as_jsonl(file_path, tokenized_batch)
             batch = []
+
     # last batch is smaller than config.tokenizer_batch_size, the "rest"
     if batch:
         tokenized_batch = tokenizer(
@@ -483,12 +519,16 @@ def tokenize_and_save_fim_examples(config: Config, file_path: Path, fim_examples
             return_tensors=None,
             return_attention_mask=True
         )
-        tokenized_batch["labels"] = _mask_labels(config, tokenized_batch["input_ids"], tokenizer)
+        # tokenized_batch["labels"] = _mask_labels(config, tokenized_batch["input_ids"], tokenizer)
+        tokenized_batch["labels"] = tokenized_batch["input_ids"]
         _save_tokenized_batch_as_jsonl(file_path, tokenized_batch)
 
+    logger.info(f"Processed and saved {examples_counter} FIM examples to {file_path}")
 
-def main():
-    user_args = parse_args()
+
+def main() -> None:
+    _setup_logger("INFO")
+    user_args = _parse_args()
     config = Config(
         source_files_language=user_args.source_files_language,
         extensions=user_args.extensions,
@@ -498,21 +538,23 @@ def main():
 
     )
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
-    tokenizer.pad_token = config.fim_pad_token  # Use FIM pad token for padding instead of default pad token
+    tokenizer.pad_token = config.fim_pad_token  # use FIM pad token for padding instead of default pad token
 
     _clear_existing_datasets(config)
 
     if user_args.split_mode == "auto":
-        print("Using auto-generated dataset split.")
+        logger.info("Using auto-generated dataset split.")
         train_code_blocks_iter, eval_code_blocks_iter, test_code_blocks_iter = get_code_blocks_from_auto_split(config) 
     elif user_args.split_mode == "manual":
-        print("Using manual dataset split from directories.")
+        logger.info("Using manual dataset split from directories.")
         train_code_blocks_iter, eval_code_blocks_iter, test_code_blocks_iter = get_code_blocks_from_manual_split(config) 
     else:
-        raise ValueError(f"Unknown split mode: {user_args.split_mode}") 
+        err_msg = f"Unknown split mode: {user_args.split_mode}"
+        logger.error(err_msg)
+        raise ValueError(err_msg) 
 
-    bytes_per_token_ratio = _estimate_bytes_per_token_ratio(config, tokenizer, number_of_code_blocks=400)
-    print(f"***********{bytes_per_token_ratio}")
+    bytes_per_token_ratio = _estimate_bytes_per_token_ratio(config, tokenizer, number_of_code_blocks=20000)
+    logger.info(f"Estimated bytes_per_token_ratio: {bytes_per_token_ratio}")
 
     train_fim_examples_iter= create_fim_examples(config, train_code_blocks_iter, bytes_per_token_ratio)
     eval_fim_examples_iter = create_fim_examples(config, eval_code_blocks_iter, bytes_per_token_ratio)
@@ -522,7 +564,7 @@ def main():
     tokenize_and_save_fim_examples(config, config.eval_path, eval_fim_examples_iter, tokenizer)
     tokenize_and_save_fim_examples(config, config.test_path, test_fim_examples_iter, tokenizer)
 
-    print("Saved train, eval, test datasets to disk")  
+    logger.info("Saved train, eval, test datasets to disk")  
    
 
 if __name__ == "__main__":
