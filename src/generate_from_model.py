@@ -1,6 +1,7 @@
 import argparse
 import torch
 import gc
+import logging.config
 import json
 import re
 import math
@@ -97,6 +98,33 @@ class Config:
         self.perplexity_plot_file = self.project_root_path / "benchmarks" / "results" / "perplexity_plot.png"
 
 
+logger = logging.getLogger(__name__)
+
+def _setup_logger(log_level: str) -> None:
+    config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "standard": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            }
+        },
+        "handlers": {
+            "stderr_handler": {
+                "level": log_level,
+                "class": "logging.StreamHandler",
+                "formatter": "standard",
+            }
+        },
+        "root": {
+            "handlers": ["stderr_handler"],
+            "level": log_level,
+            "propagate": True
+        }
+    }
+    logging.config.dictConfig(config)
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate code comparison")
     parser.add_argument("--checkpoint",
@@ -106,12 +134,30 @@ def _parse_args() -> argparse.Namespace:
                         help='Checkpoint name, or "last"')
     parser.add_argument("--plot_only",
                         action="store_true",
-                        default=False,  # Explicitly stating the default
+                        default=False,  
                         help="Skip generation; use existing data to update plots")
     return parser.parse_args()
 
 
-def _generate_code(config: Config, model: AutoModelForCausalLM, tokenizer: AutoTokenizer, prompt: str) -> tuple[str, str]:
+def _ensure_benchmark_dataset(config: Config) -> None:
+    should_create = True
+    if config.benchmark_dataset_path.exists():
+        choice = input(f"Benchmark file '{config.benchmark_dataset_path}' already exists. Overwrite? [y/N]: ").lower()
+        if choice != 'y':
+            should_create = False
+            logger.info(f"Proceeding with existing file '{config.benchmark_dataset_path}'...")
+
+    if should_create:
+        dataset_len = create_benchmark_dataset(
+            input_dataset_path=config.input_dataset_path, 
+            benchmark_dataset_path=config.benchmark_dataset_path, 
+            sample_size=config.input_sample_size,
+            min_fim_middle_chars=config.min_fim_middle_chars 
+        )
+        logger.info(f"Created new benchmark dataset '{config.benchmark_dataset_path}' with '{dataset_len}' examples")
+
+
+def _generate_code(config: Config, model: AutoModelForCausalLM, tokenizer: AutoTokenizer, prompt: str) -> str:
     model.eval()
     input_tokens_dict = tokenizer(prompt, return_tensors="pt").to(config.device)
 
@@ -136,9 +182,8 @@ def _generate_code(config: Config, model: AutoModelForCausalLM, tokenizer: AutoT
     input_length = input_tokens_dict["input_ids"].shape[1]
     generated_tokens = outputs[0][input_length:]
 
-    full_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    generated_text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
-    return generated_text, full_text 
+    generated_code = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+    return generated_code 
 
 
 def _clear_hardware_cache(config: Config) -> None:
@@ -158,7 +203,7 @@ def _get_codebleu(config: Config, reference: str, prediction: str) -> float:
         result = codebleu_score([reference], [prediction], lang=config.cb_language, weights=codebleu_algorithm_weights)
         return result['codebleu']
     except Exception as e:
-        print(f"ERROR in CodeBLEU calcualtion: {e}")
+        logger.excpetion(f"ERROR in CodeBLEU calcualtion: {e}")
         return 0.0
 
 
@@ -174,7 +219,7 @@ def _get_sentencebleu(config: Config, reference: str, prediction: str) -> float:
         smoothing_function = SmoothingFunction().method1
         return sentence_bleu([ref_tokens], pred_tokens, weights=weights, smoothing_function=smoothing_function)
     except Exception as e:
-        print(f"ERROR in SentenceBLEU calcualtion: {e}")
+        logger.exception(f"ERROR in SentenceBLEU calcualtion: {e}")
         return 0.0
 
 
@@ -189,7 +234,7 @@ def _get_exact_match(config: Config, reference: str, prediction: str) -> float:
         else:
             return 0.0
     except Exception as e:
-        print(f"ERROR in EM calcualtion: {e}")
+        logger.exception(f"ERROR in EM calcualtion: {e}")
         return 0.0
 
 
@@ -201,7 +246,7 @@ def _get_passk_prefix_match(config: Config, reference: str, prediction: str) -> 
         ref_lines = reference.splitlines()[:k]
         return 1.0 if pred_lines == ref_lines else 0.0
     except Exception as e:
-        print(f"ERROR in passk calcualtion: {e}")
+        logger.exception(f"ERROR in passk calcualtion: {e}")
         return 0.0
 
 
@@ -229,19 +274,19 @@ def _get_fim_perplexity(config: Config, model: AutoModelForCausalLM, tokenizer: 
             loss = outputs.loss
         return math.exp(loss.item())
     except Exception as e:
-        print(f"ERROR in PPL calcualtion: {e}")
+        logger.exception(f"ERROR in PPL calcualtion: {e}")
         return float('inf')
 
 
 def _generate_from_base_model_to_file(config: Config, tokenizer: AutoTokenizer) -> None:
-    print("--- Loading Base Model ---")
+    logger.info("--- Loading Base Model ---")
     base_model = AutoModelForCausalLM.from_pretrained(
         pretrained_model_name_or_path=config.model_name,
         dtype=torch.float16,
         device_map="auto"
     )
 
-    print("--- Generating Base Model Responses ---")
+    logger.info("--- Generating Base Model Responses ---")
     with open(config.benchmark_dataset_path, "r") as benchmark_dataset_file, \
          open(config.base_results_tmp_path, "w") as base_results_tmp_file:
         for i, line in enumerate(benchmark_dataset_file):
@@ -251,19 +296,20 @@ def _generate_from_base_model_to_file(config: Config, tokenizer: AutoTokenizer) 
                 f"{config.fim_suffix_token}{example['suffix']}"
                 f"{config.fim_middle_token}"
             )
-            generated_text, full_text = _generate_code(config, base_model, tokenizer, prompt)
+            generated_middle = _generate_code(config, base_model, tokenizer, prompt)
 
             base_ppl = _get_fim_perplexity(config, base_model, tokenizer, example["prefix"], example["suffix"], example["reference_middle"])
 
             results = {
                 "example_id": i,
-                "base_generated": generated_text,
+                "base_generated_middle": generated_middle,
                 "reference_middle": example["reference_middle"],
                 "base_ppl": base_ppl
             }
             json.dump(results, base_results_tmp_file)
             base_results_tmp_file.write("\n")
-            if i % 100 == 0: print(f"Processed: {i}")
+            if i % 100 == 0: 
+                logger.info(f"Processed: {i}")
 
     del base_model
     _clear_hardware_cache(config)
@@ -275,7 +321,7 @@ def _generate_from_lora_model_to_file(config: Config, user_args: argparse.Namesp
     else:
         checkpoint_path = config.trainer_output_dir_path / user_args.checkpoint
 
-    print(f"--- Loading LoRA Checkpoint: {str(checkpoint_path)} ---")
+    logger.info(f"--- Loading LoRA Checkpoint: {str(checkpoint_path)} ---")
     base_model_for_lora = AutoModelForCausalLM.from_pretrained(
         pretrained_model_name_or_path=config.model_name,
         dtype=torch.float16,
@@ -286,52 +332,51 @@ def _generate_from_lora_model_to_file(config: Config, user_args: argparse.Namesp
         model=base_model_for_lora,
         model_id=checkpoint_path,
     )
-    print("--- Generating LoRA Model Responses and Comparing ---")
+    logger.info("--- Generating LoRA Model Responses and Comparing ---")
     with open(config.benchmark_dataset_path, "r") as benchmark_dataset_file, \
          open(config.base_results_tmp_path, "r") as base_results_tmp_file, \
          open(config.comparison_results_path, "w") as comparison_results_file:
 
-        for i, (example_line, base_line) in enumerate(zip(benchmark_dataset_file, base_results_tmp_file)):
-            example = json.loads(example_line)
-            base_results = json.loads(base_line)
+        for i, (benchmark_example_line, base_results_line) in enumerate(zip(benchmark_dataset_file, base_results_tmp_file)):
+            benchmark_example = json.loads(benchmark_example_line)
+            base_results = json.loads(base_results_line)
 
             assert base_results["example_id"] == i  # sanity check
 
             prompt = (
-                f"{config.fim_prefix_token}{example['prefix']}"
-                f"{config.fim_suffix_token}{example['suffix']}"
+                f"{config.fim_prefix_token}{benchmark_example['prefix']}"
+                f"{config.fim_suffix_token}{benchmark_example['suffix']}"
                 f"{config.fim_middle_token}"
             )
-            lora_generated_text, lora_full_text = _generate_code(config, lora_model, tokenizer, prompt)
+            lora_generated_midle = _generate_code(config, lora_model, tokenizer, prompt)
 
             full_example = (
-                f"{config.fim_prefix_token}{example['prefix']}"
-                f"{config.fim_suffix_token}{example['suffix']}"
-                f"{config.fim_middle_token}{example['reference_middle']}"
+                f"{config.fim_prefix_token}{benchmark_example['prefix']}"
+                f"{config.fim_suffix_token}{benchmark_example['suffix']}"
+                f"{config.fim_middle_token}{benchmark_example['reference_middle']}"
             )
             
 
-            base_codebleu = _get_codebleu(config, example["reference_middle"], base_results["base_generated"])
-            lora_codebleu = _get_codebleu(config, example["reference_middle"], lora_generated_text)
+            base_codebleu = _get_codebleu(config, benchmark_example["reference_middle"], base_results["base_generated_middle"])
+            lora_codebleu = _get_codebleu(config, benchmark_example["reference_middle"], lora_generated_middle)
 
+            base_em = _get_exact_match(config, benchmark_example["reference_middle"], base_results["base_generated_middle"])
+            lora_em = _get_exact_match(config, benchmark_example["reference_middle"], lora_generated_middle)
 
-            base_em = _get_exact_match(config, example["reference_middle"], base_results["base_generated"])
-            lora_em = _get_exact_match(config, example["reference_middle"], lora_generated_text)
+            base_sentencebleu = _get_sentencebleu(config, benchmark_example["reference_middle"], base_results["base_generated_middle"])
+            lora_sentencebleu = _get_sentencebleu(config, benchmark_example["reference_middle"], lora_generated_middle)
 
-            base_sentencebleu = _get_sentencebleu(config, example["reference_middle"], base_results["base_generated"])
-            lora_sentencebleu = _get_sentencebleu(config, example["reference_middle"], lora_generated_text)
+            base_passk_prefix = _get_passk_prefix_match(config, benchmark_example["reference_middle"], base_results["base_generated_middle"])
+            lora_passk_prefix = _get_passk_prefix_match(config, benchmark_example["reference_middle"], lora_generated_middle)
 
-            base_passk_prefix = _get_passk_prefix_match(config, example["reference_middle"], base_results["base_generated"])
-            lora_passk_prefix = _get_passk_prefix_match(config, example["reference_middle"], lora_generated_text)
-
-            lora_ppl = _get_fim_perplexity(config, lora_model, tokenizer, example["prefix"], example["suffix"], example["reference_middle"])
+            lora_ppl = _get_fim_perplexity(config, lora_model, tokenizer, benchmark_example["prefix"], benchmark_example["suffix"], benchmark_example["reference_middle"])
 
             result = {
                 "example_id": i,
                 "full_example": full_example,
-                "reference_middle": example["reference_middle"],
-                "base_generated": base_results["base_generated"],
-                "lora_generated": lora_generated_text,
+                "reference_middle": benchmark_example["reference_middle"],
+                "base_generated_middle": base_results["base_generated_middle"],
+                "lora_generated_middle": lora_generated_middle,
                 "base_codebleu": base_codebleu,
                 "lora_codebleu": lora_codebleu,
                 "base_sentencebleu": base_sentencebleu,
@@ -344,17 +389,18 @@ def _generate_from_lora_model_to_file(config: Config, user_args: argparse.Namesp
                 "lora_ppl": lora_ppl
             }
 
-            # Write each result as one JSON line
+            # Write each result as one JSON line.
             json.dump(result, comparison_results_file)
             comparison_results_file.write("\n")
-            if i % 100 == 0: print(f"Processed: {i}")
+            if i % 100 == 0: 
+                logger.info(f"Processed: {i}")
 
     del lora_model
     _clear_hardware_cache(config)
 
 
 def _plot_metric_stats_from_file(config: Config, score_name: str, plot_file: Path, higher_is_better: bool) -> None:
-    # Extract scores
+    # extract scores
     base_scores = []
     lora_scores = []
     
@@ -365,10 +411,10 @@ def _plot_metric_stats_from_file(config: Config, score_name: str, plot_file: Pat
             lora_scores.append(data[f'lora_{score_name}'])
     
     if not base_scores:
-        print(f"No {score_name} results found.")
+        logger.error(f"No {score_name} results found.")
         return
     
-    # Stats
+    # stats
     n_examples = len(base_scores)
     avg_base = sum(base_scores) / n_examples
     avg_lora = sum(lora_scores) / n_examples
@@ -378,22 +424,22 @@ def _plot_metric_stats_from_file(config: Config, score_name: str, plot_file: Pat
     else:
         improvement = avg_base - avg_lora  # lower is better
 
-    print(f"\n=== {score_name.upper()} SUMMARY ===")
-    print(f"Examples: {n_examples}")
-    print(f"Base avg: {avg_base:.3f}")
-    print(f"LoRA avg: {avg_lora:.3f}")
-    print(f"Improvement (signed): {improvement:+.3f}")
+    logger.info(f"\n=== {score_name.upper()} SUMMARY ===")
+    logger.info(f"Examples: {n_examples}")
+    logger.info(f"Base avg: {avg_base:.3f}")
+    logger.info(f"LoRA avg: {avg_lora:.3f}")
+    logger.info(f"Improvement (signed): {improvement:+.3f}")
     
     # 3-panel plot
     plt.figure(figsize=(15, 4))
     
-    # 1: Averages
+    # 1: averages
     plt.subplot(1, 3, 1)
     plt.bar(['Base', 'LoRA'], [avg_base, avg_lora])
     plt.ylabel(f'{score_name.upper()} Score')
     plt.title('Average Scores')
     
-    # 2: Improvement histogram
+    # 2: improvement histogram
     if higher_is_better:
         improvements = [l - b for l, b in zip(lora_scores, base_scores)]
     else:
@@ -405,7 +451,7 @@ def _plot_metric_stats_from_file(config: Config, score_name: str, plot_file: Pat
     plt.ylabel('Examples')
     plt.title('Improvement Distribution')
     
-    # 3: Score distributions
+    # 3: score distributions
     plt.subplot(1, 3, 3)
     plt.hist(base_scores, bins=30, alpha=0.7, label='Base', color='blue')
     plt.hist(lora_scores, bins=30, alpha=0.7, label='LoRA', color='orange')
@@ -417,35 +463,17 @@ def _plot_metric_stats_from_file(config: Config, score_name: str, plot_file: Pat
     plt.tight_layout()
     plt.savefig(plot_file, dpi=300, bbox_inches='tight')
     plt.show()
-    print(f"Plot saved: {plot_file}")
+    logger.info(f"Plot saved: {plot_file}")
 
 
 def main():
-    nltk.download('punkt', quiet=True)  # Downloads punkt automatically
+    nltk.download('punkt', quiet=True)  # downloads punkt automatically
     config = Config()
     user_args = _parse_args()
 
-    if config.benchmark_dataset_path.exists():
-        choice = input(f"Benchmark file '{config.benchmark_dataset_path}' already exists. Overwrite? [y/N]: ").lower()
-        if choice == 'y':
-            create_benchmark_dataset(
-                input_dataset_path=config.input_dataset_path, 
-                benchmark_dataset_path=config.benchmark_dataset_path, 
-                sample_size=config.input_sample_size,
-                min_fim_middle_chars=config.min_fim_middle_chars 
-            )
-        else:
-            print(f"Proceeding with existing file '{config.benchmark_dataset_path}'...")
-    else:
-        create_benchmark_dataset(
-            input_dataset_path=config.input_dataset_path, 
-            benchmark_dataset_path=config.benchmark_dataset_path, 
-            sample_size=config.input_sample_size,
-            min_fim_middle_chars=config.min_fim_middle_chars
-        )
-
+    _ensure_benchmark_dataset(config)
     
-    if user_args.plot_only == False:  # If plot_only args is not specified 
+    if user_args.plot_only == False:  
         tokenizer = AutoTokenizer.from_pretrained(config.model_name)
         tokenizer.pad_token = config.fim_pad_token
         tokenizer.padding_side = "right"

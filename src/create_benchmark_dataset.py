@@ -6,6 +6,7 @@ from pathlib import Path
 from datasets import load_dataset, Features, Value, Sequence
 from transformers import AutoTokenizer
 
+
 @dataclass
 class Config:
     input_dataset_path: Path
@@ -45,7 +46,7 @@ def _extract_fim_parts(decoded_text: str, config: Config) -> dict:
     }
 
 
-def create_benchmark_dataset(input_dataset_path: Path, benchmark_dataset_path: Path, sample_size: int, min_fim_middle_chars: int) -> None:
+def create_benchmark_dataset(input_dataset_path: Path, benchmark_dataset_path: Path, sample_size: int, min_fim_middle_chars: int) -> int:
     config = Config(input_dataset_path=input_dataset_path, benchmark_dataset_path=benchmark_dataset_path, sample_size=sample_size)
     benchmark_dataset_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -69,15 +70,13 @@ def create_benchmark_dataset(input_dataset_path: Path, benchmark_dataset_path: P
         seed=config.shuffle_seed
     )
 
-    print(f"Decoding and extracting first {config.sample_size} examples...")
-    
     benchmark_examples = []
     added_examples_count = 0
     for data_example in shuffled_dataset:
         if added_examples_count >= config.sample_size:
             break
         
-        # Decode including special FIM tokens for regex extraction
+        # decode including special FIM tokens for regex extraction
         decoded_text = tokenizer.decode(data_example["input_ids"], skip_special_tokens=False)
         fim_parts = _extract_fim_parts(decoded_text, config)
         if (len(fim_parts["reference_middle"]) < min_fim_middle_chars or
@@ -90,5 +89,5 @@ def create_benchmark_dataset(input_dataset_path: Path, benchmark_dataset_path: P
         for example in benchmark_examples:
             if example["prefix"] or example["reference_middle"]:
                 f.write(json.dumps(example) + '\n')
-
-    print(f"Saved {len(benchmark_examples)} examples to {config.benchmark_dataset_path}")
+    
+    return len(benchmark_examples)

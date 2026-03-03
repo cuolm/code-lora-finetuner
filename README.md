@@ -281,6 +281,9 @@ pytest test_preprocess.py::test_tokenize_examples -s -v
 - [LORA: LOW-RANK ADAPTATION OF LARGE LANGUAGE MODELS](https://arxiv.org/pdf/2106.09685)
 - [Efficient Training of Language Models to
 Fill in the Middle](https://arxiv.org/pdf/2207.14255)
+- [From Output to Evaluation: Does Raw Instruction-Tuned Code LLMs
+Output Suffice for Fill-in-the-Middle Code Generation?](https://arxiv.org/pdf/2505.18789)
+- [CodeBLEU: a Method for Automatic Evaluation of Code Synthesis](https://arxiv.org/pdf/2009.10297)
 - [HF LLM Course](https://huggingface.co/learn/llm-course/chapter1/1)
 - [llama.vscode](https://github.com/ggml-org/llama.vscode)
 

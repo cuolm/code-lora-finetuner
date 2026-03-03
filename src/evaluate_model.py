@@ -1,6 +1,7 @@
 import os
 import json
 import gc
+import logging.config
 import argparse
 from dataclasses import dataclass, field 
 from typing import Tuple, Dict
@@ -16,10 +17,13 @@ import matplotlib.pyplot as plt
 from finetune_model import FIMDataCollator
 from peft import PeftModel
 
+
 @dataclass
 class Config:
     model_name: str = "Qwen/Qwen2.5-Coder-7B"
     fim_pad_token: str = "<|fim_pad|>"
+    collator_label_pad_token_id: int = -100
+
     test_dataset_path: Path = field(init=False)
     project_root_path: Path = field(init=False)
     lora_adapter_path: Path = field(init=False)
@@ -45,39 +49,63 @@ class Config:
         self.trainer_output_dir_path = self.project_root_path / "results"
         self.test_output_dir_path = self.project_root_path / "test_results"
 
+
+logger = logging.getLogger(__name__)
+
+def _setup_logger(log_level: str) -> None:
+    config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "standard": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            }
+        },
+        "handlers": {
+            "stderr_handler": {
+                "level": log_level,
+                "class": "logging.StreamHandler",
+                "formatter": "standard",
+            }
+        },
+        "root": {
+            "handlers": ["stderr_handler"],
+            "level": log_level,
+            "propagate": True
+        }
+    }
+    logging.config.dictConfig(config)
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Comparison checkpoint")
     parser.add_argument("--checkpoint",
                         type=str, 
                         required=True,
-                        metavar=""NAME_OR_LAST"",
+                        metavar="NAME_OR_LAST",
                         help='Checkpoint name, or "last"')
     user_args = parser.parse_args()
     return user_args
 
+
 def _evaluate_model(config: Config, model: AutoModelForCausalLM, tokenizer: AutoTokenizer, test_dataset: Dataset) -> Tuple[float, Dict] :
     """
-    Evaluates the model on the test dataset using Masked Cross-Entropy Loss.
-
-    The function computes the evaluation loss only over the target tokens 
-    (the middle section of the FIM task, where labels != -100). It then 
-    calculates and returns the Focused Perplexity (e^Loss) to measure 
-    how well the model predicts the missing code.
+    Evaluates the model on the test dataset calculating the loss and perplexity.
 
     Perplexity represents the model's uncertainty as the effective number of words (or choices) 
     it considers equally likely for every word it predicts.
-    A PP of 1.0 is the ideal minimum (meaning the model always predicts correctly). 
-    Example: If PP=10, the model is as uncertain as if it chose from 10 words. 
-    If PP=50, the model is 5 times more uncertain. Lower PP is always better.
+    A Perplexity of 1.0 is the ideal minimum (meaning the model always predicts correctly). 
+    Example: If Perplexity=10, the model is as uncertain as if it chose from 10 words. 
+    If Perplexity=50, the model is 5 times more uncertain. Lower Perplexity is always better.
     """
     eval_args = TrainingArguments(
         per_device_eval_batch_size=config.trainer_per_device_eval_batch_size,
-        fp16=True,  # Enables 16bit precision
+        fp16=True,  # enables 16bit precision
     )
 
     data_collator = FIMDataCollator(
         tokenizer=tokenizer,
-        label_pad_token_id=-100
+        label_pad_token_id=config.collator_label_pad_token_id
     )
     
     trainer = Trainer(
@@ -92,7 +120,7 @@ def _evaluate_model(config: Config, model: AutoModelForCausalLM, tokenizer: Auto
     perplexity = np.exp(results["eval_loss"])
 
     if 'trainer' in locals():
-        del trainer  # Clear trainer references
+        del trainer  # clear trainer references
 
     return perplexity, results
 
@@ -108,6 +136,7 @@ def _clear_hardware_cache(config: Config) -> None:
 
 def main():
     config = Config()
+    _setup_logger("INFO")
     user_args = _parse_args()
 
     dataset_features = Features({
@@ -128,9 +157,8 @@ def main():
         device_map="auto",
     )
     base_model_perplexity, base_model_results = _evaluate_model(config, base_model, tokenizer, test_dataset)
-    print(base_model_perplexity)
-    print(f"Base model perplexity: {base_model_perplexity}")
-    print(f"Base model results: {base_model_results}")
+    logger.info(f"Base model perplexity: {base_model_perplexity}")
+    logger.info(f"Base model results: {base_model_results}")
 
     del base_model
     _clear_hardware_cache(config)
@@ -140,7 +168,9 @@ def main():
     elif user_args.checkpoint:
         checkpoint_path = str(config.trainer_output_dir_path / user_args.checkpoint)
     else:
-        raise ValueError("No checkpoint specified. Use --checkpoint <name> or 'last'")
+        err_msg = "No checkpoint specified. Use --checkpoint <name> or 'last'"
+        logger.error(err_msg)
+        raise ValueError(err_msg)
 
     base_model_for_lora = AutoModelForCausalLM.from_pretrained(
         pretrained_model_name_or_path=config.model_name,
@@ -153,8 +183,8 @@ def main():
         model_id = checkpoint_path 
     )
     lora_model_perplexity, lora_model_results = _evaluate_model(config, lora_model, tokenizer, test_dataset)
-    print(f"Lora finetuned model perplexity: {lora_model_perplexity}")
-    print(f"Lora finetuned model results: {lora_model_results}")
+    logger.info(f"Lora finetuned model perplexity: {lora_model_perplexity}")
+    logger.info(f"Lora finetuned model results: {lora_model_results}")
 
     del lora_model
     _clear_hardware_cache(config)
