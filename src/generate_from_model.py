@@ -11,7 +11,6 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers.trainer_utils import get_last_checkpoint
 from peft import PeftModel
 from metrics.codebleu_adapter import codebleu_score
-import pprint as pp
 import matplotlib.pyplot as plt
 import numpy as np
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
@@ -27,8 +26,8 @@ class Config:
     fim_suffix_token: str = "<|fim_suffix|>"
     fim_middle_token: str = "<|fim_middle|>"
     fim_pad_token: str = "<|fim_pad|>"
-    input_sample_size: int = 50 
-    min_fim_middle_chars: int = 50  
+    input_sample_size: int = 200 
+    min_fim_middle_chars: int = 0  
 
     gen_max_new_tokens: int = 128 
     gen_do_sample: bool = False  # note: if set to False temperature and top_p have no effect
@@ -206,16 +205,57 @@ def _clear_hardware_cache(config: Config) -> None:
         torch.mps.empty_cache()
 
 
-def _get_codebleu(config: Config, reference: str, prediction: str) -> float:
+def _codebleu_structure_valid(config: Config, reference: str) -> bool:
+    """
+    Determine if reference code supports full CodeBLEU evaluation by verifying
+    syntax tree and dataflow extraction. Weights (0.0, 0.0, 0.5, 0.5) isolate
+    syntax and dataflow components. A perfect self-match score of 1.0 confirms
+    both are functional; otherwise the example cannot be used for reference vs
+    prediction CodeBLEU computation.
+    """
+    # suppress logger warnings
+    root_logger = logging.getLogger()
+    original_level = root_logger.getEffectiveLevel()
+    root_logger.setLevel(logging.ERROR)
+    
+    try:
+        test_weights = (0.0, 0.0, 0.5, 0.5) 
+        result = codebleu_score([reference], [reference], 
+                               lang=config.cb_language, 
+                               weights=test_weights)
+    
+        syntax_valid = result.get('syntax_match_score', 0) > 0
+        dataflow_valid = result.get('dataflow_match_score', 0) > 0
+        return syntax_valid and dataflow_valid
+    except Exception:
+        return False
+    finally:
+        # restore logger
+        root_logger.setLevel(original_level)
+
+
+
+def _get_codebleu(config: Config, reference: str, prediction: str) -> tuple[float, bool]:
     # Set weights: [n-gram, weighted n-gram, syntax (AST), data-flow]
     # Standard weighting for C is [0.25, 0.25, 0.25, 0.25]
+
+    if not _codebleu_structure_valid(config, reference):
+        return (0.0, False)
+        
     try:
-        codebleu_algorithm_weights = (config.cb_ngram_weight, config.cb_weighted_ngram_weight, config.cb_syntax_ast_weight, config.cb_dataflow_weight)
-        result = codebleu_score([reference], [prediction], lang=config.cb_language, weights=codebleu_algorithm_weights)
-        return result['codebleu']
+        codebleu_algorithm_weights = (
+            config.cb_ngram_weight, 
+            config.cb_weighted_ngram_weight, 
+            config.cb_syntax_ast_weight, 
+            config.cb_dataflow_weight
+        )
+        result = codebleu_score([reference], [prediction], 
+                               lang=config.cb_language, 
+                               weights=codebleu_algorithm_weights)
+        return (result['codebleu'], True)
     except Exception as e:
-        logger.exception(f"ERROR in CodeBLEU calcualtion: {e}")
-        return 0.0
+        logger.exception(f"ERROR in CodeBLEU calculation: {e}")
+        return (0.0, False)
 
 
 def _get_sentencebleu(config: Config, reference: str, prediction: str) -> float:
@@ -328,7 +368,7 @@ def _generate_from_base_model_to_file(config: Config, tokenizer: AutoTokenizer) 
             }
             json.dump(results, base_results_tmp_file)
             base_results_tmp_file.write("\n")
-            if i % 100 == 0: 
+            if i % 10 == 0: 
                 logger.info(f"Processed: {i}")
 
     del base_model
@@ -385,8 +425,8 @@ def _generate_from_lora_model_to_file(config: Config, user_args: argparse.Namesp
             )
             
 
-            base_codebleu = _get_codebleu(config, benchmark_example["reference_middle"], base_results["base_generated_middle"])
-            lora_codebleu = _get_codebleu(config, benchmark_example["reference_middle"], lora_generated_middle)
+            base_codebleu, codebleu_valid = _get_codebleu(config, benchmark_example["reference_middle"], base_results["base_generated_middle"])
+            lora_codebleu, _ = _get_codebleu(config, benchmark_example["reference_middle"], lora_generated_middle)
 
             base_em = _get_exact_match(config, benchmark_example["reference_middle"], base_results["base_generated_middle"])
             lora_em = _get_exact_match(config, benchmark_example["reference_middle"], lora_generated_middle)
@@ -407,6 +447,7 @@ def _generate_from_lora_model_to_file(config: Config, user_args: argparse.Namesp
                 "lora_generated_middle": lora_generated_middle,
                 "base_codebleu": base_codebleu,
                 "lora_codebleu": lora_codebleu,
+                "codebleu_valid": codebleu_valid,
                 "base_sentencebleu": base_sentencebleu,
                 "lora_sentencebleu": lora_sentencebleu,
                 "base_em": base_em,
@@ -435,6 +476,8 @@ def _plot_metric_stats_from_file(config: Config, score_name: str, plot_file: Pat
     with open(config.comparison_results_path, 'r') as f:
         for line in f:
             data = json.loads(line)
+            if (score_name == config.cb_score_name) and data["codebleu_valid"] is False:
+                continue
             base_scores.append(data[f'base_{score_name}'])
             lora_scores.append(data[f'lora_{score_name}'])
     
@@ -499,6 +542,7 @@ def main():
     nltk.download('punkt_tab', quiet=True)
 
     config = Config()
+    _setup_logger("INFO")
     user_args = _parse_args()
 
     _ensure_benchmark_dataset(config)
