@@ -1,6 +1,6 @@
 # Code LoRA Finetuner
 
-Create your own local code autocomplete model, fine-tuned on your custom code repository, for use in editors like VS Code or Neovim.
+Create your own local code autocomplete model, fine-tuned on your custom code repository, for use in editors like VS Code or Vim/Neovim.
 
 Fine-tuning is achieved by training a Low-Rank Adapter ([LoRA](https://arxiv.org/abs/2106.09685)) to perform Fill-In-the-Middle ([FIM](https://arxiv.org/abs/2207.14255)) completion. 
 
@@ -150,11 +150,15 @@ Clone the [llama.cpp](https://github.com/ggml-org/llama.cpp) repository to your 
 
     git clone https://github.com/ggml-org/llama.cpp
     cd llama.cpp
+    python -m venv .venv
+    source .venv/bin/activate
     pip install -r requirements.txt
+
+    mkdir -p "$project_root_path/lora_model_gguf"
 
     python convert_hf_to_gguf.py \
         "$project_root_path/lora_model" \
-        --outfile "$project_root_path/lora_model_gguf" \
+        --outfile "$project_root_path/lora_model_gguf/lora_model.gguf" \
         --outtype bf16
     ```
 
@@ -201,7 +205,7 @@ To allow the container to access your source code for fine-tuning, use a bind mo
 - Run an interactive container shell: Start the container with the bind mount, and open a Bash shell:
 
 ```bash
-docker run -it --rm -v $(pwd)/data:/app/data codelora-image /bin/bash
+docker run -it --rm -v $(pwd)/data:/app/data code-lora-finetuner-image /bin/bash
 ```
 Within the container, navigate the file system and edit scripts with vim to adjust any paths or code as necessary.
 
