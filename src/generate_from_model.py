@@ -79,6 +79,10 @@ class Config:
         else:
             self.device = "cpu"
 
+        # download punkt and punkt_tab automatically, used for sentencebleu
+        nltk.download('punkt', quiet=True)  
+        nltk.download('punkt_tab', quiet=True)
+
         cb_total = (self.cb_ngram_weight + self.cb_weighted_ngram_weight +
             self.cb_syntax_ast_weight + self.cb_dataflow_weight)
         if abs(cb_total - 1.0) > 1e-6:
@@ -209,11 +213,10 @@ def _clear_hardware_cache(config: Config) -> None:
 
 def _codebleu_structure_valid(config: Config, reference: str) -> bool:
     """
-    Determine if reference code supports full CodeBLEU evaluation by verifying
-    syntax tree and dataflow extraction. Weights (0.0, 0.0, 0.5, 0.5) isolate
-    syntax and dataflow components. A perfect self-match score of 1.0 confirms
-    both are functional; otherwise the example cannot be used for reference vs
-    prediction CodeBLEU computation.
+    Checks if the reference code is structurally complex enough for CodeBLEU.
+    Performs a self-match test focusing only on Syntax (AST) and Data-flow. 
+    If the reference is too simple (e.g., import blocks, comment) 
+    to build these structures, the example is skipped. 
     """
     # suppress logger warnings
     root_logger = logging.getLogger()
@@ -236,11 +239,25 @@ def _codebleu_structure_valid(config: Config, reference: str) -> bool:
         root_logger.setLevel(original_level)
 
 
-
 def _get_codebleu(config: Config, reference: str, prediction: str) -> tuple[float, bool]:
-    # Set weights: [n-gram, weighted n-gram, syntax (AST), data-flow]
-    # Standard weighting for C is [0.25, 0.25, 0.25, 0.25]
+    """
+    CodeBLEU: Computes weighted combination of four different similarity metrics:
+    1. N-gram Match: Standard surface-level text overlap.
+    2. Weighted N-gram: Text overlap with priority on keywords (if, else, etc.).
+    3. Syntax (AST): Structural similarity between Abstract Syntax Trees.
+    4. Data-flow: Logical similarity based on variable dependencies and usage.
 
+    Examples are skipped if structural components (AST/Data-flow) cannot be 
+    extracted from the reference. This prevents the final average score from 
+    being unfairly lowered by snippets that cannot be properly parsed, 
+    ensuring a more accurate representation of model quality.
+
+    Standard weights are: [0.25, 0.25, 0.25, 0.25].
+    CodeBLEU = (cb_ngram_weight * ngram_score) + 
+               (cb_weighted_ngram_weight * weighted_ngram_score) + 
+               (cb_syntax_ast_weight * syntax_ast_score) + 
+               (cb_dataflow_weight * dataflow_score)
+    """
     if not _codebleu_structure_valid(config, reference):
         return (0.0, False)
         
@@ -251,28 +268,51 @@ def _get_codebleu(config: Config, reference: str, prediction: str) -> tuple[floa
             config.cb_syntax_ast_weight, 
             config.cb_dataflow_weight
         )
-        result = codebleu_score([reference], [prediction], 
-                               lang=config.cb_language, 
-                               weights=codebleu_algorithm_weights)
-        return (result['codebleu'], True)
+        
+        result = codebleu_score(
+            [reference], [prediction], 
+            lang=config.cb_language, 
+            weights=codebleu_algorithm_weights
+        )
+        
+        return (float(result['codebleu']), True)
+        
     except Exception as e:
         logger.exception(f"ERROR in CodeBLEU calculation: {e}")
         return (0.0, False)
 
 
 def _get_sentencebleu(config: Config, reference: str, prediction: str) -> float:
-    """Calculate Sentence-BLEU score with configurable n-gram weights."""
+    """
+    SentenceBLEU: Measures n-gram overlap between reference and prediction.
+    It rewards matching sequences of words (1-4) and uses smoothing 
+    (Method1: Adds a tiny epsilon to all n-gram counts) to prevent a total 
+    0.0 score when long sequences (e.g. 4-grams) don't match exactly.
+    """
     try:
-        ref_tokens = word_tokenize(reference)
-        pred_tokens = word_tokenize(prediction)
+        reference_tokens = word_tokenize(reference)
+        prediction_tokens = word_tokenize(prediction)
         
-        weights = (config.sb_ngram_weight_1, config.sb_ngram_weight_2, 
-                  config.sb_ngram_weight_3, config.sb_ngram_weight_4)
+        weights = (
+            config.sb_ngram_weight_1, 
+            config.sb_ngram_weight_2, 
+            config.sb_ngram_weight_3, 
+            config.sb_ngram_weight_4
+        )
         
-        smoothing_function = SmoothingFunction().method1
-        return sentence_bleu([ref_tokens], pred_tokens, weights=weights, smoothing_function=smoothing_function)
+        smoothing = SmoothingFunction().method1
+        
+        score = sentence_bleu(
+            [reference_tokens], 
+            prediction_tokens, 
+            weights=weights, 
+            smoothing_function=smoothing
+        )
+        
+        return float(score)
+        
     except Exception as e:
-        logger.exception(f"ERROR in SentenceBLEU calcualtion: {e}")
+        logger.exception(f"ERROR in SentenceBLEU calculation: {e}")
         return 0.0
 
 
@@ -317,7 +357,6 @@ def _get_line_match(config: Config, reference: str, prediction: str) -> float:
     except Exception as e:
         logger.exception(f"Error in line match: {e}")
         return 0.0
-
 
 
 def _get_fim_perplexity(config: Config, model: AutoModelForCausalLM, tokenizer: AutoTokenizer,
@@ -566,10 +605,6 @@ def _plot_metric_stats_from_file(config: Config, score_name: str, plot_file: Pat
 
 
 def main():
-    # download punkt and punkt_tab automatically, used for sentencebleu calculation
-    nltk.download('punkt', quiet=True)  
-    nltk.download('punkt_tab', quiet=True)
-
     config = Config()
     _setup_logger("INFO")
     user_args = _parse_args()
