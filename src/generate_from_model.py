@@ -26,7 +26,7 @@ class Config:
     fim_suffix_token: str = "<|fim_suffix|>"
     fim_middle_token: str = "<|fim_middle|>"
     fim_pad_token: str = "<|fim_pad|>"
-    input_sample_size: int = 200 
+    input_sample_size: int = 500 
     min_fim_middle_chars: int = 0  
 
     gen_max_new_tokens: int = 128 
@@ -176,17 +176,19 @@ def _generate_code(config: Config, model: AutoModelForCausalLM, tokenizer: AutoT
         tokenizer.encode(config.fim_middle_token, add_special_tokens=False),
         tokenizer.encode(config.fim_suffix_token, add_special_tokens=False)
     ]
+
+    with torch.inference_mode(): 
+        outputs = model.generate(
+                input_ids=input_tokens_dict["input_ids"],
+                attention_mask=input_tokens_dict["attention_mask"], 
+                max_new_tokens=config.gen_max_new_tokens,
+                do_sample=config.gen_do_sample,
+                temperature=config.gen_temperature,
+                top_p=config.gen_top_p,
+                bad_words_ids=bad_words_ids,
+                pad_token_id=tokenizer.pad_token_id
+            )
     
-    outputs = model.generate(
-            input_ids=input_tokens_dict["input_ids"],
-            attention_mask=input_tokens_dict["attention_mask"], 
-            max_new_tokens=config.gen_max_new_tokens,
-            do_sample=config.gen_do_sample,
-            temperature=config.gen_temperature,
-            top_p=config.gen_top_p,
-            bad_words_ids=bad_words_ids,
-            pad_token_id=tokenizer.pad_token_id
-        )
 
     # Slice the output: take everything after the input_length. generate functin returns the whole example, not only the generated text
     input_length = input_tokens_dict["input_ids"].shape[1]
@@ -320,7 +322,7 @@ def _get_fim_perplexity(config: Config, model: AutoModelForCausalLM, tokenizer: 
         prompt_len = fim_prompt_ids.shape[1]
         labels[:, :prompt_len] = -100
 
-        with torch.no_grad():
+        with torch.inference_mode():
             outputs = model(input_ids=input_ids, labels=labels)
             loss = outputs.loss
         return math.exp(loss.item())
@@ -368,7 +370,8 @@ def _generate_from_base_model_to_file(config: Config, tokenizer: AutoTokenizer) 
             }
             json.dump(results, base_results_tmp_file)
             base_results_tmp_file.write("\n")
-            if i % 10 == 0: 
+            if i % 10 == 0:
+                _clear_hardware_cache(config)
                 logger.info(f"Processed: {i}")
 
     del base_model
@@ -424,7 +427,6 @@ def _generate_from_lora_model_to_file(config: Config, user_args: argparse.Namesp
                 f"{config.fim_middle_token}{benchmark_example['reference_middle']}"
             )
             
-
             base_codebleu, codebleu_valid = _get_codebleu(config, benchmark_example["reference_middle"], base_results["base_generated_middle"])
             lora_codebleu, _ = _get_codebleu(config, benchmark_example["reference_middle"], lora_generated_middle)
 
@@ -461,7 +463,8 @@ def _generate_from_lora_model_to_file(config: Config, user_args: argparse.Namesp
             # Write each result as one JSON line.
             json.dump(result, comparison_results_file)
             comparison_results_file.write("\n")
-            if i % 100 == 0: 
+            if i % 10 == 0: 
+                _clear_hardware_cache(config)
                 logger.info(f"Processed: {i}")
 
     del lora_model
@@ -469,7 +472,6 @@ def _generate_from_lora_model_to_file(config: Config, user_args: argparse.Namesp
 
 
 def _plot_metric_stats_from_file(config: Config, score_name: str, plot_file: Path, higher_is_better: bool) -> None:
-    # extract scores
     base_scores = []
     lora_scores = []
     
@@ -538,7 +540,8 @@ def _plot_metric_stats_from_file(config: Config, score_name: str, plot_file: Pat
 
 
 def main():
-    nltk.download('punkt', quiet=True)  # downloads punkt automatically
+    # download punkt and punkt_tab automatically, used for sentencebleu calculation
+    nltk.download('punkt', quiet=True)  
     nltk.download('punkt_tab', quiet=True)
 
     config = Config()
