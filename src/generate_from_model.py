@@ -39,36 +39,36 @@ class Config:
     input_dataset_path: Path = field(init=False)  # tokenized dataset under /datasets e.g. test_dataset.jsonl
     benchmark_dataset_path: Path = field(init=False)
     base_results_tmp_path: Path = field(init=False)
-    comparison_results_path: Path = field(init=False)
+    evaluation_results_path: Path = field(init=False)
     plot_file: Path = field(init=False)
     device: str = field(init=False)
 
     # CodeBLEU weights (must sum to 1.0)
     # see: https://arxiv.org/pdf/2009.10297  Section 4.4 for parameter suggestions 0.1, 0.1, 0.4, 0.4
-    cb_language: str = "c"
-    cb_score_name: str = "codebleu"
-    cb_ngram_weight: float = 0.1         # token-level overlap (standard BLEU)
-    cb_weighted_ngram_weight: float = 0.1 # keyword-level overlap (importance-weighted)
-    cb_syntax_ast_weight: float = 0.4     # structural correctness (Abstract Syntax Tree)
-    cb_dataflow_weight: float = 0.4       # logic consistency (Variable dependency graph)
-    cb_plot_file: Path = field(init=False)
+    codebleu_language: str = "c"
+    codebleu_score_name: str = "codebleu"
+    codebleu_ngram_weight: float = 0.1         # token-level overlap (standard BLEU)
+    codebleu_weighted_ngram_weight: float = 0.1 # keyword-level overlap (importance-weighted)
+    codebleu_syntax_ast_weight: float = 0.4     # structural correctness (Abstract Syntax Tree)
+    codebleu_dataflow_weight: float = 0.4       # logic consistency (Variable dependency graph)
+    codebleu_plot_file: Path = field(init=False)
 
     # sentence-BLEU weights (must sum to 1.0)
-    sb_score_name: str = "sentencebleu"
-    sb_ngram_weight_1: float = 0.25  # 1-gram
-    sb_ngram_weight_2: float = 0.25  # 2-gram  
-    sb_ngram_weight_3: float = 0.25  # 3-gram
-    sb_ngram_weight_4: float = 0.25  # 4-gram
-    sb_plot_file: Path = field(init=False)
+    sentencebleu_score_name: str = "sentencebleu"
+    sentencebleu_ngram_weight_1: float = 0.25  # 1-gram
+    sentencebleu_ngram_weight_2: float = 0.25  # 2-gram  
+    sentencebleu_ngram_weight_3: float = 0.25  # 3-gram
+    sentencebleu_ngram_weight_4: float = 0.25  # 4-gram
+    sentencebleu_plot_file: Path = field(init=False)
 
-    em_score_name: str = "em"
-    em_plot_file: Path = field(init=False)
+    exact_match_score_name: str = "exact_match"
+    exact_match_plot_file: Path = field(init=False)
 
-    lm_score_name: str = "lm"
-    lm_number_of_lines: int = 2  # 5 is standard production value (Sourcegraph, Cursor IDE)
-    lm_plot_file: Path = field(init=False)
+    line_match_score_name: str = "line_match"
+    line_match_number_of_lines: int = 2  # 5 is standard production value (Sourcegraph, Cursor IDE)
+    line_match_plot_file: Path = field(init=False)
 
-    perplexity_name: str = "ppl"
+    perplexity_name: str = "perplexity"
     perplexity_plot_file: Path = field(init=False)
 
     def __post_init__(self):
@@ -83,8 +83,8 @@ class Config:
         nltk.download('punkt', quiet=True)  
         nltk.download('punkt_tab', quiet=True)
 
-        cb_total = (self.cb_ngram_weight + self.cb_weighted_ngram_weight +
-            self.cb_syntax_ast_weight + self.cb_dataflow_weight)
+        cb_total = (self.codebleu_ngram_weight + self.codebleu_weighted_ngram_weight +
+            self.codebleu_syntax_ast_weight + self.codebleu_dataflow_weight)
         if abs(cb_total - 1.0) > 1e-6:
             raise ValueError(f"CodeBLEU weights must sum to 1.0, got {cb_total}")
 
@@ -93,11 +93,11 @@ class Config:
         self.input_dataset_path = self.project_root_path / "datasets" / "test_dataset.jsonl"
         self.benchmark_dataset_path = self.project_root_path / "benchmarks" / "pebble_test_examples.jsonl"
         self.base_results_tmp_path = self.project_root_path / "benchmarks" / "results" / "base_results_tmp.jsonl"
-        self.comparison_results_path = self.project_root_path / "benchmarks" / "results" / "comparison_results.jsonl"
-        self.cb_plot_file = self.project_root_path / "benchmarks" / "results" / "codebleu_plot.png"
-        self.sb_plot_file = self.project_root_path / "benchmarks" / "results" / "sentencebleu_plot.png"
-        self.em_plot_file = self.project_root_path / "benchmarks" / "results" / "em_plot.png"
-        self.lm_plot_file = self.project_root_path / "benchmarks" / "results" / "lm_plot.png"
+        self.evaluation_results_path = self.project_root_path / "benchmarks" / "results" / "evaluation_results.jsonl"
+        self.codebleu_plot_file = self.project_root_path / "benchmarks" / "results" / "codebleu_plot.png"
+        self.sentencebleu_plot_file = self.project_root_path / "benchmarks" / "results" / "sentencebleu_plot.png"
+        self.exact_match_plot_file = self.project_root_path / "benchmarks" / "results" / "exact_match_plot.png"
+        self.line_match_plot_file = self.project_root_path / "benchmarks" / "results" / "line_match_plot.png"
         self.perplexity_plot_file = self.project_root_path / "benchmarks" / "results" / "perplexity_plot.png"
 
 
@@ -164,7 +164,7 @@ def _ensure_directories_exist(config: Config) -> None:
     """Create all required output directories."""
     directories = [
         config.base_results_tmp_path.parent,
-        config.comparison_results_path.parent,
+        config.evaluation_results_path.parent,
     ]
     for dir_path in directories:
         dir_path.mkdir(parents=True, exist_ok=True)
@@ -226,7 +226,7 @@ def _codebleu_structure_valid(config: Config, reference: str) -> bool:
     try:
         test_weights = (0.0, 0.0, 0.5, 0.5) 
         result = codebleu_score([reference], [reference], 
-                               lang=config.cb_language, 
+                               lang=config.codebleu_language, 
                                weights=test_weights)
     
         syntax_valid = result.get('syntax_match_score', 0) > 0
@@ -253,25 +253,25 @@ def _get_codebleu(config: Config, reference: str, prediction: str) -> tuple[floa
     ensuring a more accurate representation of model quality.
 
     Standard weights are: [0.25, 0.25, 0.25, 0.25].
-    CodeBLEU = (cb_ngram_weight * ngram_score) + 
-               (cb_weighted_ngram_weight * weighted_ngram_score) + 
-               (cb_syntax_ast_weight * syntax_ast_score) + 
-               (cb_dataflow_weight * dataflow_score)
+    CodeBLEU = (codebleu_ngram_weight * ngram_score) + 
+               (codebleu_weighted_ngram_weight * weighted_ngram_score) + 
+               (codebleu_syntax_ast_weight * syntax_ast_score) + 
+               (codebleu_dataflow_weight * dataflow_score)
     """
     if not _codebleu_structure_valid(config, reference):
         return (0.0, False)
         
     try:
         codebleu_algorithm_weights = (
-            config.cb_ngram_weight, 
-            config.cb_weighted_ngram_weight, 
-            config.cb_syntax_ast_weight, 
-            config.cb_dataflow_weight
+            config.codebleu_ngram_weight, 
+            config.codebleu_weighted_ngram_weight, 
+            config.codebleu_syntax_ast_weight, 
+            config.codebleu_dataflow_weight
         )
         
         result = codebleu_score(
             [reference], [prediction], 
-            lang=config.cb_language, 
+            lang=config.codebleu_language, 
             weights=codebleu_algorithm_weights
         )
         
@@ -294,10 +294,10 @@ def _get_sentencebleu(config: Config, reference: str, prediction: str) -> float:
         prediction_tokens = word_tokenize(prediction)
         
         weights = (
-            config.sb_ngram_weight_1, 
-            config.sb_ngram_weight_2, 
-            config.sb_ngram_weight_3, 
-            config.sb_ngram_weight_4
+            config.sentencebleu_ngram_weight_1, 
+            config.sentencebleu_ngram_weight_2, 
+            config.sentencebleu_ngram_weight_3, 
+            config.sentencebleu_ngram_weight_4
         )
         
         smoothing = SmoothingFunction().method1
@@ -317,7 +317,7 @@ def _get_sentencebleu(config: Config, reference: str, prediction: str) -> float:
 
 
 def _get_exact_match(config: Config, reference: str, prediction: str) -> float:
-    """EM: 1.0 if identical, 0.0 otherwise. Collapese all whitespaces."""
+    """Exact match is 1.0 if identical, 0.0 otherwise. Collapese all whitespaces."""
     try:
         # re.sub(r'\s+', ' ', text.strip()): Collapses whitespace to compare logic regardless of formatting.
         ref_norm = re.sub(r'\s+', ' ', reference.strip())
@@ -328,14 +328,14 @@ def _get_exact_match(config: Config, reference: str, prediction: str) -> float:
         else:
             return 0.0
     except Exception as e:
-        logger.exception(f"ERROR in EM calculation: {e}")
+        logger.exception(f"ERROR in exact match calculation: {e}")
         return 0.0
 
 
 def _get_line_match(config: Config, reference: str, prediction: str) -> float:
     """Check if the first n lines match, ignoring trailing whitespace."""
     try:
-        n = config.lm_number_of_lines
+        n = config.line_match_number_of_lines
 
         # line.rstrip(): Removes trailing whitespace while preserving leading indentation.
         ref_lines_stripped = []
@@ -364,7 +364,7 @@ def _get_fim_perplexity(config: Config, model: AutoModelForCausalLM, tokenizer: 
     """
     FIM perplexity: Measures model confidence in the reference middle code.
     (How surprised is the model by the reference middle code).
-    Lower perplexity indicates higher confidence. PPL = exp(loss).
+    Lower perplexity indicates higher confidence. perplexity = exp(loss).
     """
     try:
         fim_prompt = (
@@ -392,30 +392,38 @@ def _get_fim_perplexity(config: Config, model: AutoModelForCausalLM, tokenizer: 
         return math.exp(loss.item())
         
     except Exception as e:
-        logger.exception(f"ERROR in PPL calculation: {e}")
+        logger.exception(f"ERROR in perplexity calculation: {e}")
         return float('inf')
 
 
-def _generate_from_base_model_to_file(config: Config, tokenizer: AutoTokenizer) -> None:
-    logger.info("--- Loading Base Model ---")
-
-    if config.device == "cuda":
-        base_model = AutoModelForCausalLM.from_pretrained(
-            pretrained_model_name_or_path=config.model_name,
-            dtype=torch.float16,
-            device_map="auto",
-            low_cpu_mem_usage=True
-        )
+def _evaluate_models_to_file(config: Config, user_args: argparse.Namespace, tokenizer: AutoTokenizer) -> None:
+    if user_args.checkpoint == "last":
+        checkpoint_path = get_last_checkpoint(config.trainer_output_dir_path)
     else:
-        base_model = AutoModelForCausalLM.from_pretrained(
-            pretrained_model_name_or_path=config.model_name,
-            dtype=torch.float16,
-            low_cpu_mem_usage=True
-        ).to(config.device)
+        checkpoint_path = config.trainer_output_dir_path / user_args.checkpoint
 
-    logger.info("--- Generating Base Model Responses ---")
-    with open(config.benchmark_dataset_path, "r") as benchmark_dataset_file, \
-         open(config.base_results_tmp_path, "w") as base_results_tmp_file:
+    logger.info(f"--- Loading Base Model and LoRA Adapter: {checkpoint_path} ---")
+    
+    # load base model
+    base_model = AutoModelForCausalLM.from_pretrained(
+        pretrained_model_name_or_path=config.model_name,
+        dtype=torch.float16,
+        device_map="auto" if config.device == "cuda" else None,
+        low_cpu_mem_usage=True
+    )
+    if config.device != "cuda":
+        base_model.to(config.device)
+
+    # load LoRA adapter
+    model = PeftModel.from_pretrained(base_model, checkpoint_path)
+    model.eval()
+
+    logger.info("--- Starting Generation and Evaluation ---")
+    
+    # process each example 
+    with config.benchmark_dataset_path.open("r") as benchmark_dataset_file, \
+         config.evaluation_results_path.open("w") as evaluation_results_file:
+        
         for i, line in enumerate(benchmark_dataset_file):
             example = json.loads(line)
             prompt = (
@@ -423,116 +431,55 @@ def _generate_from_base_model_to_file(config: Config, tokenizer: AutoTokenizer) 
                 f"{config.fim_suffix_token}{example['suffix']}"
                 f"{config.fim_middle_token}"
             )
-            generated_middle = _generate_code(config, base_model, tokenizer, prompt)
+            reference_middle = example["reference_middle"]
 
-            base_ppl = _get_fim_perplexity(config, base_model, tokenizer, example["prefix"], example["suffix"], example["reference_middle"])
+            # generation with LoRA augmented model
+            lora_generated_middle = _generate_code(config, model, tokenizer, prompt)
+            lora_perplexity = _get_fim_perplexity(config, model, tokenizer, example["prefix"], example["suffix"], reference_middle)
 
-            results = {
-                "example_id": i,
-                "base_generated_middle": generated_middle,
-                "reference_middle": example["reference_middle"],
-                "base_ppl": base_ppl
-            }
-            json.dump(results, base_results_tmp_file)
-            base_results_tmp_file.write("\n")
-            if i % 10 == 0:
-                _clear_hardware_cache(config)
-                logger.info(f"Processed: {i}")
+            # generation with base model by disabling lora adapter 
+            with model.disable_adapter():
+                base_generated_middle = _generate_code(config, model, tokenizer, prompt)
+                base_perplexity = _get_fim_perplexity(config, model, tokenizer, example["prefix"], example["suffix"], reference_middle)
 
-    del base_model
-    _clear_hardware_cache(config)
-
-
-def _generate_from_lora_model_to_file(config: Config, user_args: argparse.Namespace, tokenizer: AutoTokenizer) -> None:
-    if user_args.checkpoint == "last":
-        checkpoint_path = get_last_checkpoint(config.trainer_output_dir_path)
-    else:
-        checkpoint_path = config.trainer_output_dir_path / user_args.checkpoint
-
-    logger.info(f"--- Loading LoRA Checkpoint: {str(checkpoint_path)} ---")
-    if config.device == "cuda":
-        base_model_for_lora = AutoModelForCausalLM.from_pretrained(
-            pretrained_model_name_or_path=config.model_name,
-            dtype=torch.float16,
-            device_map="auto",
-            low_cpu_mem_usage=True
-        )
-    else:
-        base_model_for_lora = AutoModelForCausalLM.from_pretrained(
-            pretrained_model_name_or_path=config.model_name,
-            dtype=torch.float16,
-            low_cpu_mem_usage=True
-        ).to(config.device)
-
-    lora_model = PeftModel.from_pretrained(
-        model=base_model_for_lora,
-        model_id=checkpoint_path,
-    )
-    logger.info("--- Generating LoRA Model Responses and Comparing ---")
-    with open(config.benchmark_dataset_path, "r") as benchmark_dataset_file, \
-         open(config.base_results_tmp_path, "r") as base_results_tmp_file, \
-         open(config.comparison_results_path, "w") as comparison_results_file:
-
-        for i, (benchmark_example_line, base_results_line) in enumerate(zip(benchmark_dataset_file, base_results_tmp_file)):
-            benchmark_example = json.loads(benchmark_example_line)
-            base_results = json.loads(base_results_line)
-
-            assert base_results["example_id"] == i  # sanity check
-
-            prompt = (
-                f"{config.fim_prefix_token}{benchmark_example['prefix']}"
-                f"{config.fim_suffix_token}{benchmark_example['suffix']}"
-                f"{config.fim_middle_token}"
-            )
-            lora_generated_middle = _generate_code(config, lora_model, tokenizer, prompt)
-
-            full_example = (
-                f"{config.fim_prefix_token}{benchmark_example['prefix']}"
-                f"{config.fim_suffix_token}{benchmark_example['suffix']}"
-                f"{config.fim_middle_token}{benchmark_example['reference_middle']}"
-            )
+            # metrics calculation 
+            base_codebleu, codebleu_valid = _get_codebleu(config, reference_middle, base_generated_middle)
+            lora_codebleu, _ = _get_codebleu(config, reference_middle, lora_generated_middle)
             
-            base_codebleu, codebleu_valid = _get_codebleu(config, benchmark_example["reference_middle"], base_results["base_generated_middle"])
-            lora_codebleu, _ = _get_codebleu(config, benchmark_example["reference_middle"], lora_generated_middle)
+            base_sentencebleu = _get_sentencebleu(config, reference_middle, base_generated_middle)
+            lora_sentencebleu = _get_sentencebleu(config, reference_middle, lora_generated_middle)
 
-            base_em = _get_exact_match(config, benchmark_example["reference_middle"], base_results["base_generated_middle"])
-            lora_em = _get_exact_match(config, benchmark_example["reference_middle"], lora_generated_middle)
+            base_exact_match = _get_exact_match(config, reference_middle, base_generated_middle)
+            lora_exact_match = _get_exact_match(config, reference_middle, lora_generated_middle)
 
-            base_sentencebleu = _get_sentencebleu(config, benchmark_example["reference_middle"], base_results["base_generated_middle"])
-            lora_sentencebleu = _get_sentencebleu(config, benchmark_example["reference_middle"], lora_generated_middle)
-
-            base_lm = _get_line_match(config, benchmark_example["reference_middle"], base_results["base_generated_middle"])
-            lora_lm = _get_line_match(config, benchmark_example["reference_middle"], lora_generated_middle)
-
-            lora_ppl = _get_fim_perplexity(config, lora_model, tokenizer, benchmark_example["prefix"], benchmark_example["suffix"], benchmark_example["reference_middle"])
+            base_line_match = _get_line_match(config, reference_middle, base_generated_middle)
+            lora_line_match = _get_line_match(config, reference_middle, lora_generated_middle)
 
             result = {
                 "example_id": i,
-                "full_example": full_example,
-                "reference_middle": benchmark_example["reference_middle"],
-                "base_generated_middle": base_results["base_generated_middle"],
+                "reference_middle": reference_middle,
+                "base_generated_middle": base_generated_middle,
                 "lora_generated_middle": lora_generated_middle,
                 "base_codebleu": base_codebleu,
                 "lora_codebleu": lora_codebleu,
                 "codebleu_valid": codebleu_valid,
                 "base_sentencebleu": base_sentencebleu,
                 "lora_sentencebleu": lora_sentencebleu,
-                "base_em": base_em,
-                "lora_em": lora_em,
-                "base_lm": base_lm,
-                "lora_lm": lora_lm,
-                "base_ppl": base_results["base_ppl"],
-                "lora_ppl": lora_ppl
+                "base_exact_match": base_exact_match,
+                "lora_exact_match": lora_exact_match,
+                "base_line_match": base_line_match,
+                "lora_line_match": lora_line_match,
+                "base_perplexity": base_perplexity,
+                "lora_perplexity": lora_perplexity
             }
+            evaluation_results_file.write(json.dumps(result) + "\n")
 
-            # Write each result as one JSON line.
-            json.dump(result, comparison_results_file)
-            comparison_results_file.write("\n")
-            if i % 10 == 0: 
+            if i % 10 == 0:
                 _clear_hardware_cache(config)
-                logger.info(f"Processed: {i}")
+                logger.info(f"Processed Example {i}")
 
-    del lora_model
+    del model
+    del base_model
     _clear_hardware_cache(config)
 
 
@@ -540,10 +487,10 @@ def _plot_metric_stats_from_file(config: Config, score_name: str, plot_file: Pat
     base_scores = []
     lora_scores = []
     
-    with open(config.comparison_results_path, 'r') as f:
+    with open(config.evaluation_results_path, 'r') as f:
         for line in f:
             data = json.loads(line)
-            if (score_name == config.cb_score_name) and data["codebleu_valid"] is False:
+            if (score_name == config.codebleu_score_name) and data["codebleu_valid"] is False:
                 continue
             base_scores.append(data[f'base_{score_name}'])
             lora_scores.append(data[f'lora_{score_name}'])
@@ -581,7 +528,7 @@ def _plot_metric_stats_from_file(config: Config, score_name: str, plot_file: Pat
     if higher_is_better:
         improvements = [l - b for l, b in zip(lora_scores, base_scores)]
     else:
-        improvements = [b - l for l, b in zip(lora_scores, base_scores)]  # Invert for PPL
+        improvements = [b - l for l, b in zip(lora_scores, base_scores)]  # Invert for perplexity
     plt.subplot(1, 3, 2)
     plt.hist(improvements, bins=30, color='green', alpha=0.7, edgecolor='black')
     plt.axvline(0, color='red', linestyle='--', linewidth=2)
@@ -617,13 +564,12 @@ def main():
         tokenizer.padding_side = "right"
 
         _ensure_directories_exist(config)
-        _generate_from_base_model_to_file(config, tokenizer)
-        _generate_from_lora_model_to_file(config, user_args, tokenizer)
+        _evaluate_models_to_file(config, user_args, tokenizer)
 
-    _plot_metric_stats_from_file(config, config.sb_score_name, config.sb_plot_file, higher_is_better=True)
-    _plot_metric_stats_from_file(config, config.cb_score_name, config.cb_plot_file, higher_is_better=True)
-    _plot_metric_stats_from_file(config, config.em_score_name, config.em_plot_file, higher_is_better=True)
-    _plot_metric_stats_from_file(config, config.lm_score_name, config.lm_plot_file, higher_is_better=True)
+    _plot_metric_stats_from_file(config, config.sentencebleu_score_name, config.sentencebleu_plot_file, higher_is_better=True)
+    _plot_metric_stats_from_file(config, config.codebleu_score_name, config.codebleu_plot_file, higher_is_better=True)
+    _plot_metric_stats_from_file(config, config.exact_match_score_name, config.exact_match_plot_file, higher_is_better=True)
+    _plot_metric_stats_from_file(config, config.line_match_score_name, config.line_match_plot_file, higher_is_better=True)
     _plot_metric_stats_from_file(config, config.perplexity_name, config.perplexity_plot_file, higher_is_better=False)
 
 
