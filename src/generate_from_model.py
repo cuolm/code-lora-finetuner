@@ -135,22 +135,19 @@ def _parse_args() -> argparse.Namespace:
                         required=True,
                         metavar="NAME_OR_LAST",
                         help='Checkpoint name, or "last"')
-    parser.add_argument("--plot_only",
+    parser.add_argument("--plot-only",
                         action="store_true",
                         default=False,  
-                        help="Skip generation; use existing data to update plots")
+                        help="Skip generation, use existing data to update plots")
+    parser.add_argument("--overwrite-dataset",
+                        action="store_true",
+                        default=False,  
+                        help="Overwrite benchmark dataset")
     return parser.parse_args()
 
 
-def _ensure_benchmark_dataset(config: Config) -> None:
-    should_create = True
-    if config.benchmark_dataset_path.exists():
-        choice = input(f"Benchmark file '{config.benchmark_dataset_path}' already exists. Overwrite? [y/N]: ").lower()
-        if choice != 'y':
-            should_create = False
-            logger.info(f"Proceeding with existing file '{config.benchmark_dataset_path}'...")
-
-    if should_create:
+def _ensure_benchmark_dataset(config: Config, user_args: argparse.Namespace) -> None:
+    if user_args.overwrite_dataset or not config.benchmark_dataset_path.exists():
         dataset_len = create_benchmark_dataset(
             input_dataset_path=config.input_dataset_path, 
             benchmark_dataset_path=config.benchmark_dataset_path, 
@@ -158,6 +155,8 @@ def _ensure_benchmark_dataset(config: Config) -> None:
             min_fim_middle_chars=config.min_fim_middle_chars 
         )
         logger.info(f"Created new benchmark dataset '{config.benchmark_dataset_path}' with '{dataset_len}' examples")
+    else:
+        logger.info(f"Proceeding with existing file '{config.benchmark_dataset_path}'...")
 
 
 def _ensure_directories_exist(config: Config) -> None:
@@ -556,7 +555,7 @@ def main():
     _setup_logger("INFO")
     user_args = _parse_args()
 
-    _ensure_benchmark_dataset(config)
+    _ensure_benchmark_dataset(config, user_args)
     
     if user_args.plot_only == False:  
         tokenizer = AutoTokenizer.from_pretrained(config.model_name)
