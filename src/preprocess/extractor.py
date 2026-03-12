@@ -15,35 +15,32 @@ logger = logging.getLogger("src.preprocess.extractor")
 
 
 def get_custom_tree_sitter_parser(tree_sitter_lib_path: Path, source_files_language: str) -> ts.Parser:
+    if not tree_sitter_lib_path.exists():
+        err_msg = f"Library not found: {tree_sitter_lib_path}"
+        logger.error(err_msg)
+        raise FileNotFoundError(err_msg)
+    try:
         lib = ctypes.CDLL(str(tree_sitter_lib_path)) # Load C Dynamic Link Library, makes all the public C functions inside the .dylib file available to be called from the Python script.
         entry_point_func_name = f"tree_sitter_{source_files_language}"
         lang_func = getattr(lib, entry_point_func_name) # Retrieves the entry point function of the loaded lib
         lang_func.restype = ctypes.c_void_p # Tells ctypes that this function returns a C-style pointer (void *)
         grammar_rules = ts.Language(lang_func()) # Call lang_func() function and wrap the returned raw C pointer into a tree-sitter Language object
         return ts.Parser(grammar_rules) 
+    except (AttributeError, OSError) as e:
+        logger.exception(f"Failed to load custom tree sitter language parser: {e}")
+        raise
 
 
 def get_tree_sitter_language_pack_parser(source_files_language: str) -> ts.Parser:
     return get_parser(source_files_language)
 
 
-def _is_utf8_file(filepath: Path) -> bool:
-    try:
-        with open(filepath, 'rb') as f:
-            f.read().decode("utf8")
-        return True
-    except UnicodeDecodeError:
-        return False
-
-
 def _auto_create_split_paths(config: Config) -> Tuple[list[Path], list[Path], list[Path]]:
     all_file_paths = []
     for filepath in config.raw_data_path.rglob("*"):
-        if not (
-            filepath.is_file() 
-            and any(filepath.suffix.lower() == ext for ext in config.extensions)
-            and _is_utf8_file(filepath)
-            ):
+        if not filepath.is_file():
+            continue
+        if filepath.suffix.lower() not in config.extensions:
             continue
         all_file_paths.append(filepath)
 
@@ -147,9 +144,11 @@ def _get_filtered_paths(config: Config, directory: Path) -> list[Path]:
     filtered_paths = []
     
     for entry in directory.rglob("*"):
-        filename = entry.name.lower()
-        if any(filename.endswith(ext) for ext in config.extensions):
-            filtered_paths.append(entry)
+        if not entry.is_file():
+            continue
+        if entry.suffix.lower() not in config.extensions:
+            continue
+        filtered_paths.append(entry)
 
     return filtered_paths
 
