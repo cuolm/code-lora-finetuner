@@ -122,6 +122,28 @@ def _clear_existing_datasets(config: Config, force_delete_datasets: bool) -> Non
     return True
 
 
+def _validate_and_configure_tokenizer(config: Config, tokenizer: AutoTokenizer):
+    required_tokens = [
+        config.fim_prefix_token,
+        config.fim_middle_token,
+        config.fim_suffix_token,
+        config.fim_pad_token,
+        config.eos_token
+    ]
+
+    for token in required_tokens:
+        token_id = tokenizer.convert_tokens_to_ids(token)
+        
+        if token_id == tokenizer.unk_token_id or token_id is None:
+            logger.error(f"Token '{token}' defined in Config is missing from Tokenizer vocabulary.")
+            raise ValueError(f"Tokenizer mismatch: {token} not found.")
+
+    tokenizer.pad_token = config.fim_pad_token
+    tokenizer.eos_token = config.eos_token
+
+    logger.info("Tokenizer validated and configured successfully.")
+
+
 def main() -> None:
     user_args = _parse_args()
     _setup_logger(user_args.log_level)
@@ -145,8 +167,6 @@ def main() -> None:
         logger.error(err_msg)
         raise RuntimeError(err_msg)
 
-    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
-    tokenizer.pad_token = config.fim_pad_token  # use FIM pad token for padding instead of default pad token
 
     if not _clear_existing_datasets(config, user_args.force_delete_datasets):
         return
@@ -157,6 +177,9 @@ def main() -> None:
     else: # user_args.split_mode == "manual":
         logger.info("Using manual dataset split from directories.")
         train_code_blocks_iter, eval_code_blocks_iter, test_code_blocks_iter = get_code_blocks_from_manual_split(config) 
+
+    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
+    _validate_and_configure_tokenizer(config, tokenizer)
 
     bytes_per_token_ratio = estimate_bytes_per_token_ratio(config, tokenizer, number_of_code_blocks=20000)
     logger.info(f"Estimated bytes_per_token_ratio: {bytes_per_token_ratio}")
