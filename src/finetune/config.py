@@ -8,6 +8,7 @@ from pathlib import Path
 @dataclass
 class Config:
     model_name: str = "Qwen/Qwen2.5-Coder-1.5B"
+    model_attn_implementation: str = "sdpa" # sdpa = built-in PyTorch implementation of scaled dot product attention, imporves performance and memory efficienc
     fim_pad_token: str = "<|fim_pad|>"
     lora_r: int = 32 
     lora_alpha: int = 64

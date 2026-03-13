@@ -8,17 +8,21 @@ from .config import Config
 
 
 def load_and_configure_lora_model(config: Config) -> AutoModelForCausalLM:
-    model_dtype = torch.bfloat16 if config.trainer_bf16 else torch.float16
+    if config.trainer_bf16:
+        model_dtype = torch.bfloat16
+    else:
+        model_dtype = torch.float16
+
     if config.device == "cuda":
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",  # quantization type fp4 or nf4"
+            bnb_4bit_quant_type="nf4",  # nf4 (NormalFloat4) = optimal for LLM training, because llm weights follwo normal distribution  
             bnb_4bit_compute_type=model_dtype,
             bnb_4bit_use_double_quant=True,
         )
         model = AutoModelForCausalLM.from_pretrained(
             pretrained_model_name_or_path=config.model_name,
-            #attn_implementation="sdpa", # built-in PyTorch implementation of scaled dot product attention
+            attn_implementation=config.model_attn_implementation,  
             quantization_config=bnb_config,
             device_map="auto" # let bitsandbytes handle placement
         )
@@ -26,11 +30,13 @@ def load_and_configure_lora_model(config: Config) -> AutoModelForCausalLM:
     elif config.device == "mps":
         model = AutoModelForCausalLM.from_pretrained(
             pretrained_model_name_or_path=config.model_name,
-            torch_dtype=model_dtype  # reduces weights from 32-bit to 16-bit float.
+            attn_implementation=config.model_attn_implementation,
+            torch_dtype=model_dtype 
         ).to("mps")
     else:
         model = AutoModelForCausalLM.from_pretrained(
             pretrained_model_name_or_path=config.model_name,
+            attn_implementation=config.model_attn_implementation
         ).to("cpu")
     
     # forces the input to require gradients, ensuring the backward pass graph stays connected when using frozen base models with gradient checkpointing
