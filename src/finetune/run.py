@@ -84,7 +84,7 @@ def load_datasets(config: Config) -> Tuple[IterableDataset, IterableDataset]:
     # This allows processing data samples on-the-fly without downloading or loading the entire dataset into memory.
     # https://huggingface.co/docs/datasets/stream
     train_dataset = load_dataset("json", data_files=str(config.train_dataset_path), features=dataset_features, streaming=True)["train"]
-    train_dataset = train_dataset.shuffle(buffer_size=config.shuffle_buffer_size, seed=config.shuffle_seed) # take up to suffle_buffer_size examples and randomly shuffle them
+    train_dataset = train_dataset.shuffle(buffer_size=config.dataset_shuffle_buffer_size, seed=config.dataset_shuffle_seed)  # take up to suffle_buffer_size examples and randomly shuffle them
     eval_dataset = load_dataset("json", data_files=str(config.eval_dataset_path), features=dataset_features, streaming=True)["train"]
     return train_dataset, eval_dataset 
 
@@ -94,7 +94,7 @@ def main() -> None:
     _setup_logger("INFO")
     user_args = _parse_args(config)
     train_dataset, eval_dataset= load_datasets(config)
-    logger.info(f"Dataset: {config.train_dataset_length} train examples, max_steps={config.trainer_max_steps}")
+    logger.info(f"Dataset: {config.dataset_train_dataset_length} train examples, max_steps={config.trainer_max_steps}")
 
     lora_model = load_and_configure_lora_model(config)
     lora_model.print_trainable_parameters()

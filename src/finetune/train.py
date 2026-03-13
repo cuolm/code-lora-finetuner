@@ -125,21 +125,21 @@ def train_and_save_lora_model(
             torch.cuda.empty_cache()  # clear gpu cache
         
         # Ensure offload folder for merging exists before loading the model.
-        config.model_merge_offload_folder_path.mkdir(parents=True, exist_ok=True)
+        config.trainer_model_merge_offload_folder_path.mkdir(parents=True, exist_ok=True)
 
         # Load fresh FP16 base model.
         base_model = AutoModelForCausalLM.from_pretrained(
             pretrained_model_name_or_path=config.model_name,
             dtype=torch.float16,
             device_map="auto",
-            offload_folder=str(config.model_merge_offload_folder_path), # Offload model layers to disk during loading to prevent RAM (OOM) crashes. 
+            offload_folder=str(config.trainer_model_merge_offload_folder_path), # Offload model layers to disk during loading to prevent RAM (OOM) crashes. 
             low_cpu_mem_usage=True
         )
 
         lora_model = PeftModel.from_pretrained(
             base_model, 
             config.lora_adapter_path,
-            offload_folder=str(config.model_merge_offload_folder_path)
+            offload_folder=str(config.trainer_model_merge_offload_folder_path)
         )
 
     # Merge lora adapter into base model and save it with the tokenizer of the model.
@@ -149,8 +149,8 @@ def train_and_save_lora_model(
     tokenizer.save_pretrained(config.lora_model_path)
 
     # Clean up offload folder.
-    if config.model_merge_offload_folder_path.exists():
-        shutil.rmtree(config.model_merge_offload_folder_path)
+    if config.trainer_model_merge_offload_folder_path.exists():
+        shutil.rmtree(config.trainer_model_merge_offload_folder_path)
 
     return log_history 
 
@@ -200,4 +200,3 @@ def plot_loss(config: Config) -> None:
     plt.grid(True)
     plt.savefig(Path(config.trainer_output_dir_path) / "loss_plot.png")
     plt.show()
-    
