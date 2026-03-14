@@ -145,16 +145,10 @@ def _validate_and_configure_tokenizer(config: Config, tokenizer: AutoTokenizer):
 
 
 def main() -> None:
+    config = Config()
+
     user_args = _parse_args()
     _setup_logger(user_args.log_level)
-
-    config = Config.create(
-        source_files_language=user_args.source_files_language,
-        extensions=user_args.extensions,
-        split_mode=user_args.split_mode,
-        raw_data_path=user_args.raw_data_path,
-        tree_sitter_parser_path = user_args.tree_sitter_parser_path
-    )
 
     if not _clear_existing_datasets(config, user_args.force_delete_datasets):
         return

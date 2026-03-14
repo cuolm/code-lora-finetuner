@@ -68,7 +68,7 @@ def _extract_code_blocks_rec(config: Config, node: ts.Node, source_code_utf8: by
         return []
     
     code_blocks = []
-    if node.type in config.block_types:
+    if node.type in config.tree_sitter_block_types:
         code_utf8 = source_code_utf8[node.start_byte:node.end_byte]
         code_blocks.append((code_utf8, node))
     
@@ -94,14 +94,14 @@ def get_code_blocks_from_paths(config: Config, file_paths: list[Path]) -> Iterat
         try:
             source_code_unicode = path.read_text(encoding='utf8')
         except UnicodeDecodeError:
-            logger.exception(f"Skipping file '{path}': Not a valid UTF-8 file.")
+            logger.warning(f"Skipping file '{path}': Not a valid UTF-8 file.")
             continue
 
         source_code_utf8 = source_code_unicode.encode('utf8')
         try:
             tree = config.tree_sitter_parser.parse(source_code_utf8)
         except Exception as exc:
-            logger.exception(f"Skipping file '{path}': failed to parse with tree-sitter: {exc}")
+            logger.warning(f"Skipping file '{path}': failed to parse with tree-sitter: {exc}")
             continue
         root_node = tree.root_node
 

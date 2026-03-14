@@ -23,7 +23,7 @@ def _extract_subblock_ranges(config: Config, node: ts.Node, base_offset: int) ->
     """
     subblock_ranges = []
 
-    if node.type in config.subblock_types:
+    if node.type in config.tree_sitter_subblock_types:
         relative_start_byte = node.start_byte - base_offset
         relative_end_byte = node.end_byte - base_offset
         subblock_ranges.append((relative_start_byte, relative_end_byte))
