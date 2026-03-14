@@ -1,7 +1,6 @@
 
 import logging
 
-import torch
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 
@@ -35,7 +34,7 @@ def load_and_configure_lora_model(config: Config) -> AutoModelForCausalLM:
     else:
         model = AutoModelForCausalLM.from_pretrained(
             pretrained_model_name_or_path=config.model_name,
-            attn_implementation=config.model_attn_implementationa,
+            attn_implementation=config.model_attn_implementation,
             dtype=config.model_dtype
         ).to("cpu")
     
