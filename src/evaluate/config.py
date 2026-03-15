@@ -33,7 +33,7 @@ class Config:
 
     # --- Metrics: CodeBLEU ---
     codebleu_language: str = "c"
-    codebleu_score_name: str = "codebleu"
+    codebleu_metric_name: str = "codebleu"
     # CodeBLEU weights (must sum to 1.0)
     # see: https://arxiv.org/pdf/2009.10297  Section 4.4 for parameter suggestions 0.1, 0.1, 0.4, 0.4
     codebleu_ngram_weight: float = 0.25  # token-level overlap (standard BLEU) 
@@ -42,7 +42,7 @@ class Config:
     codebleu_dataflow_weight: float = 0.25  # logic consistency (variable dependency graph)   
 
     # --- Metrics: SentenceBLEU ---
-    sentencebleu_score_name: str = "sentencebleu"
+    sentencebleu_metric_name: str = "sentencebleu"
     # sentence-BLEU weights (must sum to 1.0)
     sentencebleu_ngram_weight_1: float = 0.25  # 1-gram 
     sentencebleu_ngram_weight_2: float = 0.25  # 2-gram    
@@ -50,8 +50,8 @@ class Config:
     sentencebleu_ngram_weight_4: float = 0.25  # 4-gram
 
     # --- Metrics: Other ---
-    exact_match_score_name: str = "exact_match"
-    line_match_score_name: str = "line_match"
+    exact_match_metric_name: str = "exact_match"
+    line_match_metric_name: str = "line_match"
     line_match_number_of_lines: int = 2  
     perplexity_name: str = "perplexity"
 

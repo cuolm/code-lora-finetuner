@@ -1,12 +1,11 @@
-from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
-from nltk.tokenize import word_tokenize
-from transformers import AutoTokenizer, AutoModelForCausalLM
 import logging
-import torch
-import math 
 import re
+from nltk.tokenize import word_tokenize
+from nltk.translate.bleu_score import SmoothingFunction, sentence_bleu
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from .codebleu_shim import codebleu_score
 from .config import Config
-from .codebleu_adapter import codebleu_score
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +37,7 @@ def _codebleu_structure_valid(config: Config, reference: str) -> bool:
         root_logger.setLevel(original_level)
 
 
-def _get_codebleu(config: Config, reference: str, prediction: str) -> tuple[float, bool]:
+def get_codebleu(config: Config, reference: str, prediction: str) -> tuple[float, bool]:
     """
     CodeBLEU: Computes weighted combination of four different similarity metrics:
     1. N-gram Match: Standard surface-level text overlap.
@@ -81,7 +80,7 @@ def _get_codebleu(config: Config, reference: str, prediction: str) -> tuple[floa
         return (0.0, False)
 
 
-def _get_sentencebleu(config: Config, reference: str, prediction: str) -> float:
+def get_sentencebleu(config: Config, reference: str, prediction: str) -> float:
     """
     SentenceBLEU: Measures n-gram overlap between reference and prediction.
     It rewards matching sequences of words (1-4) and uses smoothing 
@@ -117,7 +116,7 @@ def _get_sentencebleu(config: Config, reference: str, prediction: str) -> float:
         return 0.0
 
 
-def _get_exact_match(config: Config, reference: str, prediction: str) -> float:
+def get_exact_match(config: Config, reference: str, prediction: str) -> float:
     """Exact match is 1.0 if identical, 0.0 otherwise. Collapese all whitespaces."""
     try:
         # re.sub(r'\s+', ' ', text.strip()): Collapses whitespace to compare logic regardless of formatting.
@@ -133,7 +132,7 @@ def _get_exact_match(config: Config, reference: str, prediction: str) -> float:
         return 0.0
 
 
-def _get_line_match(config: Config, reference: str, prediction: str) -> float:
+def get_line_match(config: Config, reference: str, prediction: str) -> float:
     """Check if the first n lines match, ignoring trailing whitespace."""
     try:
         n = config.line_match_number_of_lines
@@ -158,40 +157,3 @@ def _get_line_match(config: Config, reference: str, prediction: str) -> float:
     except Exception as e:
         logger.exception(f"Error in line match: {e}")
         return 0.0
-
-
-def _get_fim_perplexity(config: Config, model: AutoModelForCausalLM, tokenizer: AutoTokenizer,
-                       prefix: str, suffix: str, reference_middle: str) -> float:
-    """
-    FIM perplexity: Measures model confidence in the reference middle code.
-    (How surprised is the model by the reference middle code).
-    Lower perplexity indicates higher confidence. perplexity = exp(loss).
-    """
-    try:
-        fim_prompt = (
-            f"{config.fim_prefix_token}{prefix}"
-            f"{config.fim_suffix_token}{suffix}"
-            f"{config.fim_middle_token}"
-        )
-        
-        prompt_tokenized = tokenizer(fim_prompt, return_tensors="pt")
-        middle_tokenized = tokenizer(reference_middle, return_tensors="pt")
-
-        prompt_ids = prompt_tokenized.input_ids.to(config.device)
-        middle_ids = middle_tokenized.input_ids.to(config.device)
-
-        input_ids = torch.cat([prompt_ids, middle_ids], dim=1)
-        
-        labels = input_ids.clone()
-        prompt_len = prompt_ids.shape[1]
-        labels[:, :prompt_len] = -100
-
-        with torch.inference_mode():
-            outputs = model(input_ids=input_ids, labels=labels)
-            loss = outputs.loss
-            
-        return math.exp(loss.item())
-        
-    except Exception as e:
-        logger.exception(f"ERROR in perplexity calculation: {e}")
-        return float('inf')

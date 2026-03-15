@@ -1,7 +1,10 @@
-
-# This adapter patches CodeBLEU so it uses tree-sitter-language-pack instead
-# of importing tree_sitter_<lang> modules directly. This allows CodeBLEU to
-# work with the project's existing tree-sitter-language-pack setup.
+"""
+This shim module patches CodeBLEU so it uses tree-sitter-language-pack instead
+of importing tree_sitter_<lang> modules directly. This allows CodeBLEU to
+work with the project's existing tree-sitter-language-pack setup.
+(A shim replaces specific internal functions of the originally imported 
+package with custom functions.)
+"""
 
 from typing import Dict, List, Union
 import tree_sitter_language_pack
@@ -18,7 +21,7 @@ def shim_get_tree_sitter_language(lang: str):
         ) from e
 
 
-# Apply patch so all internal CodeBLEU calls use the language pack
+# apply shim so all internal CodeBLEU calls use the tree_sitter_language_pack 
 codebleu.utils.get_tree_sitter_language = shim_get_tree_sitter_language
 codebleu.codebleu.get_tree_sitter_language = shim_get_tree_sitter_language
 

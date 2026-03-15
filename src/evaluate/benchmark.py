@@ -1,11 +1,23 @@
+import argparse
 import json
-import random
+import logging
 import re
-from dataclasses import dataclass, field
-from pathlib import Path
-from datasets import load_dataset, Features, Value, Sequence
+
+from datasets import Features, Sequence, Value, load_dataset
 from transformers import AutoTokenizer
+
 from .config import Config
+
+
+logger = logging.getLogger("src.evaluate.benchmark")
+
+
+def ensure_benchmark_dataset(config: Config, user_args: argparse.Namespace) -> None:
+    if user_args.overwrite_dataset or not config.benchmark_dataset_path.exists():
+        dataset_len = _create_benchmark_dataset(config)
+        logger.info(f"Created new benchmark dataset '{config.benchmark_dataset_path}' with '{dataset_len}' examples")
+    else:
+        logger.info(f"Proceeding with existing file '{config.benchmark_dataset_path}'...")
 
 
 def _extract_fim_parts(config: Config, decoded_text: str) -> dict:
@@ -30,7 +42,7 @@ def _extract_fim_parts(config: Config, decoded_text: str) -> dict:
     }
 
 
-def create_benchmark_dataset(config: Config) -> int:
+def _create_benchmark_dataset(config: Config) -> int:
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
 
     dataset_features = Features({
