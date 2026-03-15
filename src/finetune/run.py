@@ -16,7 +16,7 @@ logger = logging.getLogger("src.finetune.run")
 
 
 def _setup_logger(log_level: str) -> None:
-    config = {
+    logger_config = {
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": {
@@ -39,7 +39,7 @@ def _setup_logger(log_level: str) -> None:
             }
         }
     }
-    logging.config.dictConfig(config)
+    logging.config.dictConfig(logger_config)
 
 
 def _parse_args(config: Config) -> argparse.Namespace:
