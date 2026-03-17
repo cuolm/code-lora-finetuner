@@ -6,7 +6,9 @@ from nltk.translate.bleu_score import SmoothingFunction, sentence_bleu
 from .codebleu_shim import codebleu_score
 from .config import Config
 
+
 logger = logging.getLogger(__name__)
+
 
 def _codebleu_structure_valid(config: Config, reference: str) -> bool:
     """

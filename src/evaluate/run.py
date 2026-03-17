@@ -4,7 +4,7 @@ import logging.config
 
 from transformers.trainer_utils import get_last_checkpoint
 
-from .analyze import calculate_metric, save_all_metric_stats, plot_metric_and_save, plot_metric_averages_and_save
+from .analyze import analyze_metric, save_all_metric_stats, get_plot_path, plot_metric_and_save, plot_all_metric_averages_and_save
 from .config import Config
 from .evaluate import evaluate_and_save
 from .generate import generate_and_save
@@ -94,22 +94,16 @@ def main():
         generate_and_save(config, checkpoint_path)
         evaluate_and_save(config)
 
-    metric_configurations = [
-        (config.sentencebleu_metric_name, config.sentencebleu_plot_path, True),
-        (config.codebleu_metric_name, config.codebleu_plot_path, True),
-        (config.exact_match_metric_name, config.exact_match_plot_path, True),
-        (config.line_match_metric_name, config.line_match_plot_path, True),
-        (config.perplexity_name, config.perplexity_plot_path, False),
-    ]
-
     all_metric_stats_np = []
-    for metric_name, plot_path, higher_is_better in metric_configurations:
-        metric_stats_np = calculate_metric(config, metric_name, higher_is_better)
+    for metric_name, higher_is_better in config.metric_configs:
+        metric_stats_np = analyze_metric(config, metric_name, higher_is_better)
+        plot_path = get_plot_path(config.benchmark_evaluation_results_dir, metric_name)
         plot_metric_and_save(metric_stats_np, metric_name, plot_path)
         all_metric_stats_np.append(metric_stats_np)
     
+    all_metric_averages_plot_path = get_plot_path(config.benchmark_evaluation_results_dir, "all_metric_averages")
+    plot_all_metric_averages_and_save(all_metric_stats_np, all_metric_averages_plot_path) 
     save_all_metric_stats(config, user_args.checkpoint, all_metric_stats_np)
-    plot_metric_averages_and_save(config.benchmark_evaluation_report_path, config.benchmark_evaluation_averages_path) 
 
 
 if __name__ == "__main__":

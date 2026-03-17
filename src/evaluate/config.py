@@ -66,14 +66,9 @@ class Config:
     trainer_output_dir_path: Path = field(init=False)
     test_dataset_path: Path = field(init=False)  
     benchmark_dataset_path: Path = field(init=False)
-    codebleu_plot_path: Path = field(init=False)
-    sentencebleu_plot_path: Path = field(init=False)
-    exact_match_plot_path: Path = field(init=False)
-    line_match_plot_path: Path = field(init=False)
-    perplexity_plot_path: Path = field(init=False)
+    benchmark_evaluation_results_dir: Path = field(init=False)
     benchmark_evaluation_results_path: Path = field(init=False)
-    benchmark_evaluation_report_path: Path = field(init=False)
-    benchmark_evaluation_averages_path: Path = field(init=False)
+    benchmark_analysis_results_path: Path = field(init=False)
 
     def __post_init__(self):
         self._setup_device_and_precision()
@@ -106,14 +101,19 @@ class Config:
         self.trainer_output_dir_path = self.project_root_path / "results"
         self.test_dataset_path = self.project_root_path / "datasets" / "test_dataset.jsonl"
         self.benchmark_dataset_path = self.project_root_path / "benchmarks" / "benchmark_dataset.jsonl"
+        self.benchmark_evaluation_results_dir = self.project_root_path / "benchmarks" / "results"
         self.benchmark_evaluation_results_path = self.project_root_path / "benchmarks" / "results" / "evaluation_results.jsonl"
-        self.codebleu_plot_path = self.project_root_path / "benchmarks" / "results" / "codebleu_plot.png"
-        self.sentencebleu_plot_path = self.project_root_path / "benchmarks" / "results" / "sentencebleu_plot.png"
-        self.exact_match_plot_path = self.project_root_path / "benchmarks" / "results" / "exact_match_plot.png"
-        self.line_match_plot_path = self.project_root_path / "benchmarks" / "results" / "line_match_plot.png"
-        self.perplexity_plot_path = self.project_root_path / "benchmarks" / "results" / "perplexity_plot.png"
-        self.benchmark_evaluation_report_path = self.project_root_path / "benchmarks" / "results" / "evaluation_report.json"
-        self.benchmark_evaluation_averages_path = self.project_root_path / "benchmarks" / "results" / "all_metrics_average.png"
+        self.benchmark_analysis_results_path = self.project_root_path / "benchmarks" / "results" / "analysis_results.json"
+
+    @property
+    def metric_configs(self) -> list[tuple[str, bool]]:
+        return [
+            (self.sentencebleu_metric_name, True),
+            (self.codebleu_metric_name, True),
+            (self.exact_match_metric_name, True),
+            (self.line_match_metric_name, True),
+            (self.perplexity_name, False),
+        ]
      
     def ensure_nltk_initialized(self) -> None:
         if not self._nltk_initialized:

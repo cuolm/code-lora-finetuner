@@ -11,16 +11,16 @@ from .config import Config
 logger = logging.getLogger("src.evaluate.analyze")
 
 
-def calculate_metric(config: Config, metric_name: str, higher_is_better: bool) -> dict:
+def analyze_metric(config: Config, metric_name: str, higher_is_better: bool) -> dict:
     base_scores, lora_scores = [], []
     
-    with open(config.benchmark_evaluation_results_path, 'r') as f:
-        for line in f:
-            data = json.loads(line)
-            if metric_name == config.codebleu_metric_name and not data.get("codebleu_valid", True):
+    with open(config.benchmark_evaluation_results_path, 'r') as evaluation_results_file:
+        for line in evaluation_results_file:
+            evaluation_example = json.loads(line)
+            if metric_name == config.codebleu_metric_name and not evaluation_example.get("codebleu_valid", True):
                 continue
-            base_scores.append(data[f'base_{metric_name}'])
-            lora_scores.append(data[f'lora_{metric_name}'])
+            base_scores.append(evaluation_example[f'base_{metric_name}'])
+            lora_scores.append(evaluation_example[f'lora_{metric_name}'])
     
     if not base_scores:
         logger.error(f"No {metric_name} results found.")
@@ -57,13 +57,19 @@ def calculate_metric(config: Config, metric_name: str, higher_is_better: bool) -
     return metric_stats_np
 
 
-def plot_metric_and_save(stats: dict, metric_name: str, plot_path: Path) -> None:
-    base_array_np = stats["base_array_np"]
-    lora_array_np = stats["lora_array_np"]
-    base_average_np = stats["base_average_np"]
-    lora_average_np = stats["lora_average_np"]
+def get_plot_path(plots_dir: Path, metric_name: str) -> Path:
+    """Converts metric names to standardized filenames."""
+    safe_name = metric_name.lower().replace(" ", "_")
+    return plots_dir / f"{safe_name}_plot.png"
+
+
+def plot_metric_and_save(metric_stats_np: dict, metric_name: str, plot_path: Path) -> None:
+    base_array_np = metric_stats_np["base_array_np"]
+    lora_array_np = metric_stats_np["lora_array_np"]
+    base_average_np = metric_stats_np["base_average_np"]
+    lora_average_np = metric_stats_np["lora_average_np"]
     
-    if stats["is_binary"]:
+    if metric_stats_np["is_binary"]:
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
         fig.suptitle(f'{metric_name.title()} Scores', fontsize=16) 
         
@@ -114,7 +120,7 @@ def plot_metric_and_save(stats: dict, metric_name: str, plot_path: Path) -> None
         if use_limit:
             axs[1, 0].text(0.95, 0.05, f'Note: Values > {y_axis_limit} hidden', transform=axs[1, 0].transAxes, ha='right', va='bottom', fontsize=10, bbox=dict(facecolor='white', alpha=0.8))
         
-        differences = (lora_array_np - base_array_np) if stats["higher_is_better"] else (base_array_np - lora_array_np)
+        differences = (lora_array_np - base_array_np) if metric_stats_np["higher_is_better"] else (base_array_np - lora_array_np)
         axs[1, 1].hist(differences, bins=30, color='purple', alpha=0.7, edgecolor='black')
         axs[1, 1].axvline(0, color='black', linestyle='dashed')
         axs[1, 1].axvline(np.mean(differences), color='red', linestyle='solid')
@@ -154,33 +160,21 @@ def save_all_metric_stats(config: Config, checkpoint_name: str, all_metric_stats
         "evaluation_date": datetime.now().isoformat(timespec="seconds"),
         "all_metric_stats": all_metric_stats 
     }
-    with open(config.benchmark_evaluation_report_path, "w") as report_file:
+    with open(config.benchmark_analysis_results_path, "w") as report_file:
         json.dump(report_content, report_file, indent=4)
-    logger.info(f"Evaluation report saved to: {config.benchmark_evaluation_report_path}")
+    logger.info(f"Analysis results saved to: {config.benchmark_analysis_results_path}")
 
 
-def plot_metric_averages_and_save(benchmark_evaluation_report_path: Path, plot_path: Path) -> None:
-    try:
-        with benchmark_evaluation_report_path.open("r") as f:
-            data = json.load(f)
-    except Exception:
-        logger.exception(f"Failed to process evaluation report at: {benchmark_evaluation_report_path}")
-        return
-
-    all_metric_stats = data.get("all_metric_stats", [])
-    if not all_metric_stats:
-        logger.error("No results found in evaluation report.")
-        return
-
-    number_of_metrics = len(all_metric_stats)
+def plot_all_metric_averages_and_save(all_metric_stats_np: dict, plot_path: Path) -> None:
+    number_of_metrics = len(all_metric_stats_np)
     fig, axes = plt.subplots(2, 3, figsize=(18, 12))
     axes = axes.flatten()
     
-    for idx, metric_stats in enumerate(all_metric_stats):
+    for idx, metric_stats in enumerate(all_metric_stats_np):
         metric_name = metric_stats["metric"]
-        base_average = metric_stats["base_average"]
-        lora_average = metric_stats["lora_average"]
-        n_examples = len(metric_stats["base_array"])
+        base_average = metric_stats["base_average_np"]
+        lora_average = metric_stats["lora_average_np"]
+        n_examples = len(metric_stats["base_array_np"])
         
         ax = axes[idx]
         bars = ax.bar(['Base', 'LoRA'], [base_average, lora_average],color=['steelblue', 'darkorange'], alpha=0.8)
