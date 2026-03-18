@@ -53,11 +53,11 @@ class FIMDataCollator:
 
 def train_lora_model(
         config: Config,
+        checkpoint: str,
         lora_model: PeftModel,
         tokenizer: AutoTokenizer,
         train_dataset: IterableDataset,
         eval_dataset: IterableDataset,
-        user_args: argparse.Namespace
 ) -> List: 
     logger.info(f"Starting training: {config.trainer_max_steps} steps on {config.device}, batch_size={config.trainer_per_device_train_batch_size}") 
 
@@ -108,10 +108,10 @@ def train_lora_model(
         data_collator = data_collator
     )
 
-    if user_args.resume == "last":
+    if checkpoint == "last":
         trainer.train(resume_from_checkpoint=True)
-    elif user_args.resume is not None:
-        trainer.train(resume_from_checkpoint=user_args.resume) 
+    elif checkpoint is not None:
+        trainer.train(resume_from_checkpoint=checkpoint) 
     else:
         trainer.train()  # train from scratch
 

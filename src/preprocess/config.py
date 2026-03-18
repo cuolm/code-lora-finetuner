@@ -39,7 +39,7 @@ class Config:
 
     # --- Paths ---
     project_root_path: Path = field(init=False) 
-    raw_data_path: Path = field(init=False) 
+    raw_data_path: Path | None = None 
     train_path: Path = field(init=False)
     eval_path: Path = field(init=False)
     test_path: Path = field(init=False)
@@ -63,7 +63,8 @@ class Config:
 
     def _setup_paths(self):
         self.project_root_path = Path(__file__).resolve().parents[2]
-        self.raw_data_path = self.project_root_path / "data" 
+        if self.raw_data_path is None:
+            self.raw_data_path = self.project_root_path / "data"
         self.train_path = self.project_root_path / "datasets" / "train_dataset.jsonl"
         self.eval_path = self.project_root_path / "datasets" / "eval_dataset.jsonl"
         self.test_path = self.project_root_path / "datasets" / "test_dataset.jsonl"

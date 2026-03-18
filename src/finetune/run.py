@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 def _setup_logger(log_level: str) -> None:
+    """
+    Configure the root logger ("") to capture logs from the entry point (__main__),
+    all internal sub-modules, and third-party libraries via a single handler.
+    """
     logger_config = {
         "version": 1,
         "disable_existing_loggers": False,
@@ -32,7 +36,7 @@ def _setup_logger(log_level: str) -> None:
             }
         },
         "loggers": {
-            "src.finetune": {  
+            "": {  # "" corresponds to root logger 
                 "handlers": ["stderr_handler"],
                 "level": log_level,
                 "propagate": False,
@@ -52,7 +56,7 @@ def _parse_args(config: Config) -> argparse.Namespace:
         help="Logging level.",
     )
     parser.add_argument(
-        "--resume",
+        "--checkpoint",
         type=str,
         default=None,
         help='Resume from "last" or path'
@@ -63,21 +67,6 @@ def _parse_args(config: Config) -> argparse.Namespace:
         help="Delete existing output dir"
     )
     args = parser.parse_args()
-
-    output_dir = config.trainer_output_dir_path
-    if args.resume and not args.delete_all_checkpoints:
-        logger.info(f"Resuming from: {args.resume}")
-    elif not args.resume and args.delete_all_checkpoints:
-        if output_dir.exists():
-            logger.warning(f"Deleting: {output_dir}")
-            shutil.rmtree(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Cleared: {output_dir}")
-    elif args.resume and args.delete_all_checkpoints:
-        logger.error("Configuration conflict: Cannot resume from a checkpoint while '--delete-all-checkpoints' is set.")
-        sys.exit(1)
-    else:
-        logger.info(f"Starting fresh training. Existing checkpoints in {output_dir} are preserved.")
 
     return args
 
@@ -100,10 +89,22 @@ def load_datasets(config: Config) -> Tuple[IterableDataset, IterableDataset]:
     return train_dataset, eval_dataset 
 
 
-def main() -> None:
-    config = Config()
-    user_args = _parse_args(config)
-    _setup_logger(user_args.log_level)
+def run(config: Config, checkpoint: str, delete_all_checkpoints: bool) -> None:
+    output_dir = config.trainer_output_dir_path
+    if checkpoint and not delete_all_checkpoints:
+        logger.info(f"Resuming from: {checkpoint}")
+    elif not checkpoint and delete_all_checkpoints:
+        if output_dir.exists():
+            logger.warning(f"Deleting: {output_dir}")
+            shutil.rmtree(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Cleared: {output_dir}")
+    elif checkpoint and delete_all_checkpoints:
+        logger.error("Configuration conflict: Cannot resume from a checkpoint while '--delete-all-checkpoints' is set.")
+        sys.exit(1)
+    else:
+        logger.info(f"Starting fresh training. Existing checkpoints in {output_dir} are preserved.")
+
     train_dataset, eval_dataset= load_datasets(config)
     logger.info(f"Dataset: {config.dataset_train_dataset_length} train examples, max_steps={config.trainer_max_steps}")
 
@@ -114,12 +115,22 @@ def main() -> None:
     tokenizer.pad_token = config.fim_pad_token
     tokenizer.padding_side = "right"
 
-    log_history = train_lora_model(config, lora_model, tokenizer, train_dataset, eval_dataset, user_args)
+    log_history = train_lora_model(config, checkpoint, lora_model, tokenizer, train_dataset, eval_dataset)
     merge_lora_and_save(config, tokenizer)
-    # log_history = train_and_save_lora_model(config, lora_model, train_dataset, eval_dataset, user_args)
     save_log(config, log_history)
 
     plot_loss(config)
+
+
+def main() -> None:
+    config = Config()
+    user_args = _parse_args(config)
+    _setup_logger(user_args.log_level)
+    run(
+        config=config,
+        checkpoint=user_args.checkpoint,
+        delete_all_checkpoints=user_args.delete_all_checkpoints
+    )
 
 
 if __name__ == "__main__":

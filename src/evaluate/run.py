@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 
 def _setup_logger(log_level: str) -> None:
+    """
+    Configure the root logger ("") to capture logs from the entry point (__main__),
+    all internal sub-modules, and third-party libraries via a single handler.
+    """
     logger_config = {
         "version": 1,
         "disable_existing_loggers": False,
@@ -31,7 +35,7 @@ def _setup_logger(log_level: str) -> None:
             }
         },
         "loggers": {
-            "src.evaluate": {  
+            "": {  # "" corresponds to root logger 
                 "handlers": ["stderr_handler"],
                 "level": log_level,
                 "propagate": False,
@@ -72,12 +76,8 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main():
-    config = Config()
-    user_args = _parse_args()
-    _setup_logger(user_args.log_level)
-
-    if user_args.overwrite_dataset or not config.benchmark_dataset_path.exists():
+def run(config: Config, checkpoint: str, plot_only: bool, overwrite_dataset: bool) -> None:
+    if overwrite_dataset or not config.benchmark_dataset_path.exists():
         dataset_len = create_benchmark_dataset(config)
         if checkpoint_path is None:
             logger.error(f"No checkpoint found under {config.trainer_output_dir_path}")
@@ -86,11 +86,11 @@ def main():
     else:
         logger.info(f"Proceeding with existing file '{config.benchmark_dataset_path}'...")
     
-    if not user_args.plot_only: 
-        if user_args.checkpoint == "last":
+    if not plot_only: 
+        if checkpoint == "last":
             checkpoint_path = get_last_checkpoint(config.trainer_output_dir_path)
         else:
-            checkpoint_path = config.trainer_output_dir_path / user_args.checkpoint
+            checkpoint_path = config.trainer_output_dir_path / checkpoint
         generate_and_save(config, checkpoint_path)
         evaluate_and_save(config)
 
@@ -103,7 +103,19 @@ def main():
     
     all_metric_averages_plot_path = get_plot_path(config.benchmark_evaluation_results_dir, "all_metric_averages")
     plot_all_metric_averages_and_save(all_metric_stats_np, all_metric_averages_plot_path) 
-    save_all_metric_stats(config, user_args.checkpoint, all_metric_stats_np)
+    save_all_metric_stats(config, checkpoint, all_metric_stats_np)
+
+
+def main():
+    config = Config()
+    user_args = _parse_args()
+    _setup_logger(user_args.log_level)
+    run(
+        config=config, 
+        checkpoint=user_args.checkpoint,
+        plot_only=user_args.plot_only, 
+        overwrite_dataset=user_args.overwrite_dataset
+    )
 
 
 if __name__ == "__main__":

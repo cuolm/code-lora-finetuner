@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 
 
 def _setup_logger(log_level: str) -> None:
+    """
+    Configure the root logger ("") to capture logs from the entry point (__main__),
+    all internal sub-modules, and third-party libraries via a single handler.
+    """
     logger_config = {
         "version": 1,
         "disable_existing_loggers": False,
@@ -30,7 +34,7 @@ def _setup_logger(log_level: str) -> None:
             }
         },
         "loggers": {
-            "src.preprocess": {  
+            "": {  # "" corresponds to root logger 
                 "handlers": ["stderr_handler"],
                 "level": log_level,
                 "propagate": False,
@@ -89,37 +93,15 @@ def _parse_args() -> argparse.Namespace:
         "--tree-sitter-parser-path",
         type=Path,
         default=None,
-        help="Optional path to a custom compiled Tree-sitter shared library file (.so, .dylib, .dll). If not set, the parser is loaded from the standard language pack."
-    )
-
+        help="Optional path to a custom compiled Tree-sitter shared library file (.so, .dylib, .dll). If not set, the parser is loaded from the standard language pack.")
     return parser.parse_args()
 
 
-def _clear_existing_datasets(config: Config, force_delete_datasets: bool) -> None:
-    dataset_files = [config.train_path, config.eval_path, config.test_path]
-    
-    existing_dataset_files = []
-    for file in dataset_files:
+def _clear_existing_datasets(config: Config) -> None:
+    for file in [config.train_path, config.eval_path, config.test_path]:
         if file.exists():
-            logger.info(f"Found existing dataset: {file}")
-            existing_dataset_files.append(file)
-
-    if not existing_dataset_files:
-        return True
-
-    if not force_delete_datasets:
-        answer = input("Found existing files. Delete and start fresh? (y/n): ").strip().lower()
-        if answer != "y":
-            logger.info("Aborted by user. Existing datasets preserved.")
-            return False
-    for file in existing_dataset_files: 
-        try:
             file.unlink()
-            logger.info("Deleted dataset file: %s", file)
-        except OSError as exc:
-            logger.error("Failed to delete %s: %s", file, exc)
-            return False
-    return True
+            logger.info(f"Deleted old dataset: {file}")
 
 
 def _validate_and_configure_tokenizer(config: Config, tokenizer: AutoTokenizer):
@@ -144,16 +126,10 @@ def _validate_and_configure_tokenizer(config: Config, tokenizer: AutoTokenizer):
     logger.info("Tokenizer validated and configured successfully.")
 
 
-def main() -> None:
-    config = Config()
+def run(config: Config, split_mode: str) -> None:
+    _clear_existing_datasets(config)
 
-    user_args = _parse_args()
-    _setup_logger(user_args.log_level)
-
-    if not _clear_existing_datasets(config, user_args.force_delete_datasets):
-        return
-
-    if user_args.split_mode == "auto":
+    if split_mode == "auto":
         logger.info("Using auto-generated dataset split.")
         train_code_blocks_iter, eval_code_blocks_iter, test_code_blocks_iter = get_code_blocks_from_auto_split(config) 
     else: # user_args.split_mode == "manual":
@@ -176,6 +152,20 @@ def main() -> None:
 
     logger.info("Saved train, eval, test datasets to disk")  
 
-   
+
+def main() -> None:
+    user_args = _parse_args()
+    config = Config(
+        split_mode=user_args.split_mode,
+        source_files_language=user_args.source_files_language,
+        extensions=user_args.extensions,
+        raw_data_path=user_args.raw_data_path,
+        tree_sitter_parser_path=user_args.tree_sitter_parser_path
+    )
+    _setup_logger(user_args.log_level)
+    run(config=config, split_mode=user_args.split_mode)
+
+
 if __name__ == "__main__":
     main()
+    
