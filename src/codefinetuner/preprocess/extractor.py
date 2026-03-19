@@ -12,14 +12,14 @@ from .config import Config
 logger = logging.getLogger(__name__)
 
 
-def get_custom_tree_sitter_parser(tree_sitter_lib_path: Path, source_files_language: str) -> ts.Parser:
+def get_custom_tree_sitter_parser(tree_sitter_lib_path: Path, data_language: str) -> ts.Parser:
     if not tree_sitter_lib_path.exists():
         err_msg = f"Library not found: {tree_sitter_lib_path}"
         logger.error(err_msg)
         raise FileNotFoundError(err_msg)
     try:
         lib = ctypes.CDLL(str(tree_sitter_lib_path)) # Load C Dynamic Link Library, makes all the public C functions inside the .dylib file available to be called from the Python script.
-        entry_point_func_name = f"tree_sitter_{source_files_language}"
+        entry_point_func_name = f"tree_sitter_{data_language}"
         lang_func = getattr(lib, entry_point_func_name) # Retrieves the entry point function of the loaded lib
         lang_func.restype = ctypes.c_void_p # Tells ctypes that this function returns a C-style pointer (void *)
         grammar_rules = ts.Language(lang_func()) # Call lang_func() function and wrap the returned raw C pointer into a tree-sitter Language object
@@ -29,8 +29,8 @@ def get_custom_tree_sitter_parser(tree_sitter_lib_path: Path, source_files_langu
         raise
 
 
-def get_tree_sitter_language_pack_parser(source_files_language: str) -> ts.Parser:
-    return get_parser(source_files_language)
+def get_tree_sitter_language_pack_parser(data_language: str) -> ts.Parser:
+    return get_parser(data_language)
 
 
 def auto_create_split_paths(config: Config) -> Tuple[list[Path], list[Path], list[Path]]:
@@ -38,7 +38,7 @@ def auto_create_split_paths(config: Config) -> Tuple[list[Path], list[Path], lis
     for filepath in config.raw_data_path.rglob("*"):
         if not filepath.is_file():
             continue
-        if filepath.suffix.lower() not in config.extensions:
+        if filepath.suffix.lower() not in config.data_extensions:
             continue
         all_file_paths.append(filepath)
 
@@ -46,7 +46,7 @@ def auto_create_split_paths(config: Config) -> Tuple[list[Path], list[Path], lis
 
     num_files = len(all_file_paths)
     if num_files == 0:
-        logger.warning(f"No source files found under {config.raw_data_path} with extensions {config.extensions}")
+        logger.warning(f"No source files found under {config.raw_data_path} with extensions {config.data_extensions}")
 
     train_end = int(num_files * config.train_ratio)
     eval_end = train_end + int(num_files * config.eval_ratio)
@@ -144,7 +144,7 @@ def _get_filtered_paths(config: Config, directory: Path) -> list[Path]:
     for entry in directory.rglob("*"):
         if not entry.is_file():
             continue
-        if entry.suffix.lower() not in config.extensions:
+        if entry.suffix.lower() not in config.data_extensions:
             continue
         filtered_paths.append(entry)
 

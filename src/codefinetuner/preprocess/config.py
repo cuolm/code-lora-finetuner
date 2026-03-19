@@ -2,25 +2,26 @@ import math
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import tree_sitter as ts
+from omegaconf import OmegaConf, DictConfig, MISSING
 
 
 @dataclass
 class Config:
-    # --- Model ---
-    model_name: str = "Qwen/Qwen2.5-Coder-7B"
-    fim_prefix_token: str = "<|fim_prefix|>"
-    fim_middle_token: str = "<|fim_middle|>"
-    fim_suffix_token: str = "<|fim_suffix|>"
-    fim_pad_token: str = "<|fim_pad|>"
-    eos_token: str = "<|endoftext|>"
-    tokenizer_batch_size: int = 32
+    # --- Mandatory Parameters ---
+    model_name: str = MISSING
+    fim_prefix_token: str = MISSING
+    fim_middle_token: str = MISSING
+    fim_suffix_token: str = MISSING
+    fim_pad_token: str = MISSING
+    eos_token: str = MISSING
+    data_language: str = MISSING
+    data_extensions: list[str] = MISSING
 
-    # --- Example Creation ---
-    source_files_language: str = "c"
-    extensions: list[str] = field(default_factory=lambda: [".c", ".h"])
+    # --- Preprocess Local Parameters ---
     split_mode: str = "auto"
     train_ratio: float = 0.8
     eval_ratio: float = 0.1
@@ -30,12 +31,14 @@ class Config:
     min_middle_tokens_length: int = 20  # used with estimated bytes_per_token_ratio to convert bytes to tokens, final token count is thus not exact 
     max_middle_tokens_length: int = 200  # used with estimated bytes_per_token_ratio to convert bytes to tokens, final token count is thus not exact
     fim_examples_per_subblock_ratio: float = 1.0  # 1.0 = all fim examples of a subblock are extracted, 0.5 = onls 50% of fim examples of a subblock are extracted
+    tokenizer_batch_size: int = 32
+    rng_seed: int = 0 
 
     # --- Tree Sitter Parser ---
-    tree_sitter_parser: ts.Parser = field(init=False)
+    tree_sitter_parser: Any = field(init=False)  # type hint Any because omegaconf does not recognize ts.Parser as a valid type (yaml file cannot contain an object of ts.Parser)
     tree_sitter_parser_path: Path | None = None
-    tree_sitter_block_types: set[str] = field(init=False)
-    tree_sitter_subblock_types: set[str] = field(init=False)
+    tree_sitter_block_types: Any = field(init=False)  # type hint Any because omegaconf does not support set type
+    tree_sitter_subblock_types: Any = field(init=False)  # type hint Any because omegaconf does not support set type
 
     # --- Paths ---
     project_root_path: Path = field(init=False) 
@@ -45,9 +48,19 @@ class Config:
     test_dataset_path: Path = field(init=False)
 
     # --- Randomization ---
-    rng_seed: int = 0 
-    rng: np.random.Generator = field(init=False)
+    rng: Any = field(init=False)  # type hint Any because omegaconf does not support np.random.Generator type
 
+    @classmethod
+    def load_from_yaml(cls, yaml_path: Path) -> "Config":
+        if not yaml_path.exists():
+            raise FileNotFoundError(f"Config file not found: {yaml_path}")
+        
+        config_object = OmegaConf.structured(cls)
+        yaml_file_config = OmegaConf.load(yaml_path) 
+        yaml_preprocess_fields = yaml_file_config.preprocess
+        merged_config = OmegaConf.merge(config_object, yaml_preprocess_fields)
+        
+        return OmegaConf.to_object(merged_config)
 
     def __post_init__(self):
         self._validate_ratio()
@@ -63,7 +76,7 @@ class Config:
             raise ValueError(f"Train + eval + test ratios must sum to 1.0, got {total_ratio}")
 
     def _setup_paths(self):
-        self.project_root_path = Path(__file__).resolve().parents[2]
+        self.project_root_path = Path(__file__).resolve().parents[3]
         if self.raw_data_path is None:
             self.raw_data_path = self.project_root_path / "data"
         self.preprocess_outputs_dir_path = self.project_root_path / "outputs" / "preprocess"
@@ -87,14 +100,14 @@ class Config:
         with open(blocks_path, "r", encoding="utf-8") as f:
             language_data = json.load(f)
 
-        language_blocks = language_data.get(self.source_files_language)
+        language_blocks = language_data.get(self.data_language)
         if language_blocks is None:
-            raise ValueError(f"Language '{self.source_files_language}' not found in {blocks_path}")
+            raise ValueError(f"Language '{self.data_language}' not found in {blocks_path}")
 
         tree_sitter_block_types = language_blocks.get("block_types")
         tree_sitter_subblock_types = language_blocks.get("subblock_types")
         if not isinstance(tree_sitter_block_types, list) or not isinstance(tree_sitter_subblock_types, list):
-            raise ValueError(f"Invalid block definitions for '{self.source_files_language}' in {blocks_path}")
+            raise ValueError(f"Invalid block definitions for '{self.data_language}' in {blocks_path}")
 
         self.tree_sitter_block_types = set(tree_sitter_block_types)
         self.tree_sitter_subblock_types = set(tree_sitter_subblock_types)
@@ -102,10 +115,10 @@ class Config:
     def _init_tree_sitter_parser(self) -> None:
         if self.tree_sitter_parser_path:
             from .extractor import get_custom_tree_sitter_parser
-            self.tree_sitter_parser = get_custom_tree_sitter_parser(self.tree_sitter_parser_path, self.source_files_language)
+            self.tree_sitter_parser = get_custom_tree_sitter_parser(self.tree_sitter_parser_path, self.data_language)
         else:
             from .extractor import get_tree_sitter_language_pack_parser
-            self.tree_sitter_parser = get_tree_sitter_language_pack_parser(self.source_files_language)
+            self.tree_sitter_parser = get_tree_sitter_language_pack_parser(self.data_language)
         
         if self.tree_sitter_parser is None:
             raise RuntimeError("Tree-sitter parser not initialized")

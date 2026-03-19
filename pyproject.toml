@@ -19,4 +19,5 @@ dependencies = [
     "tree-sitter-language-pack>=0.2.0",
     "codebleu>=0.7.0",
     "nltk>=3.9.2",
+    "omegaconf>=2.3.0",
 ]

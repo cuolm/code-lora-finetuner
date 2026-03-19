@@ -1,0 +1,85 @@
+# config/pipeline.yaml - Single Source of Truth
+# Shared across ALL stages (MANDATORY - no defaults in dataclasses)
+globals: &globals
+  model_name: "Qwen/Qwen2.5-Coder-1.5B"
+  fim_prefix_token: "<|fim_prefix|>"
+  fim_middle_token: "<|fim_middle|>"
+  fim_suffix_token: "<|fim_suffix|>"
+  fim_pad_token: "<|fim_pad|>"
+  eos_token: "<|endoftext|>"
+  data_language: "c"
+  data_extensions: [".c", ".h"]
+
+# Preprocess stage - inherits globals + local params
+preprocess:
+  <<: *globals
+  split_mode: "auto"
+  train_ratio: 0.8
+  eval_ratio: 0.1
+  test_ratio: 0.1
+  max_token_sequence_length: 1024
+  max_code_blocks_ast_depth: 2
+  min_middle_tokens_length: 20
+  max_middle_tokens_length: 200
+  fim_examples_per_subblock_ratio: 1.0
+  tokenizer_batch_size: 32
+  tree_sitter_parser_path: null 
+  raw_data_path: "data/data_embedded"  # null  
+  rng_seed: 0
+
+# Finetune stage - inherits globals + local params  
+finetune:
+  <<: *globals
+  model_attn_implementation: "sdpa"
+  checkpoint: null
+  delete_all_checkpoints: false
+  lora_r: 32
+  lora_alpha: 64
+  lora_dropout: 0.1
+  lora_bias: "none"
+  lora_target_modules: ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "down_proj", "up_proj"]
+  trainer_num_train_epochs: 1
+  trainer_per_device_train_batch_size: 2
+  trainer_per_device_eval_batch_size: 2
+  trainer_gradient_accumulation_steps: 32
+  trainer_learning_rate: 2e-5
+  trainer_weight_decay: 0.1
+  trainer_max_grad_norm: 1.0
+  trainer_lr_scheduler_type: "cosine"
+  trainer_warmup_steps: 50
+  trainer_gradient_checkpointing: true
+  trainer_log_level: "info"
+  trainer_logging_steps: 10
+  trainer_eval_strategy: "steps"
+  trainer_eval_steps: 100
+  trainer_save_strategy: "steps"
+  trainer_save_steps: 100
+  trainer_logging_strategy: "steps"
+  dataset_shuffle_buffer_size: 50000
+  dataset_shuffle_seed: 0
+  collator_label_pad_token_id: -100
+
+# Evaluate stage - inherits globals + local params
+evaluate:
+  <<: *globals
+  benchmark_sample_size: 4
+  benchmark_min_fim_middle_tokens: 0
+  benchmark_shuffle_buffer_size: 10000000
+  benchmark_shuffle_seed: 42
+  generation_max_new_tokens: 128
+  generation_do_sample: false
+  generation_temperature: 0.7
+  generation_top_p: 0.95
+  codebleu_language: "c"
+  codebleu_ngram_weight: 0.25
+  codebleu_weighted_ngram_weight: 0.25
+  codebleu_syntax_ast_weight: 0.25
+  codebleu_dataflow_weight: 0.25
+  sentencebleu_ngram_weight_1: 0.25
+  sentencebleu_ngram_weight_2: 0.25
+  sentencebleu_ngram_weight_3: 0.25
+  sentencebleu_ngram_weight_4: 0.25
+  line_match_number_of_lines: 2
+  checkpoint: "last"
+  plot_only: false
+  overwrite_dataset: false

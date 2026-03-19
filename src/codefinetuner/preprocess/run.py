@@ -52,9 +52,10 @@ def _normalize_extension(ext: str) -> str:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Preprocess code dataset for FIM fine-tuning.")
     parser.add_argument(
-        "--force-delete-datasets",
-        action="store_true",
-        help="Delete existing datasets without confirmation.",
+        "--config",
+        type=Path,
+        required=True,
+        help="YAML config file path with 'preprocess:' section. All Config.MISSING fields must be provided."
     )
     parser.add_argument(
         "--log-level",
@@ -63,39 +64,7 @@ def _parse_args() -> argparse.Namespace:
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Logging level.",
     )
-    parser.add_argument(
-        "--extensions",
-        nargs="+",
-        type=_normalize_extension,
-        default=[".c", ".h"],
-        help="List of file extensions to include (e.g. .c .h .cpp .py)"
-    )
-    parser.add_argument(
-        "--source-files-language",
-        type=str,
-        default="c", 
-        help="The source code language to process (e.g., c, python, java). Used for Tree-sitter parsing."
-    )
-    parser.add_argument(
-        "--split-mode",
-        type=str,
-        choices=["auto", "manual"],
-        default="auto",  
-        help="Dataset splitting mode. Choose 'auto' for automatic ratio-based split or 'manual' for pre-split directories (train/eval/test) in raw_data_path (the directories have to be present if using 'manual')"
-    )
-    parser.add_argument(
-        "--raw-data-path",
-        type=Path,
-        default=None,
-        help="Optional path to the root directory containing the raw source code files. Overrides the default path './data'."
-    )
-    parser.add_argument(
-        "--tree-sitter-parser-path",
-        type=Path,
-        default=None,
-        help="Optional path to a custom compiled Tree-sitter shared library file (.so, .dylib, .dll). If not set, the parser is loaded from the standard language pack.")
     return parser.parse_args()
-
 
 def _clear_existing_datasets(config: Config) -> None:
     for file in [config.train_dataset_path, config.eval_dataset_path, config.test_dataset_path]:
@@ -126,13 +95,13 @@ def _validate_and_configure_tokenizer(config: Config, tokenizer: AutoTokenizer):
     logger.info("Tokenizer validated and configured successfully.")
 
 
-def run(config: Config, split_mode: str) -> None:
+def run(config: Config) -> None:
     _clear_existing_datasets(config)
 
-    if split_mode == "auto":
+    if config.split_mode == "auto":
         logger.info("Using auto-generated dataset split.")
         train_code_blocks_iter, eval_code_blocks_iter, test_code_blocks_iter = get_code_blocks_from_auto_split(config) 
-    else: # user_args.split_mode == "manual":
+    else: # config.split_mode == "manual":
         logger.info("Using manual dataset split from directories.")
         train_code_blocks_iter, eval_code_blocks_iter, test_code_blocks_iter = get_code_blocks_from_manual_split(config) 
 
@@ -155,15 +124,9 @@ def run(config: Config, split_mode: str) -> None:
 
 def main() -> None:
     user_args = _parse_args()
-    config = Config(
-        split_mode=user_args.split_mode,
-        source_files_language=user_args.source_files_language,
-        extensions=user_args.extensions,
-        raw_data_path=user_args.raw_data_path,
-        tree_sitter_parser_path=user_args.tree_sitter_parser_path
-    )
+    preprocess_config = Config.load_from_yaml(user_args.config)
     _setup_logger(user_args.log_level)
-    run(config=config, split_mode=user_args.split_mode)
+    run(config=preprocess_config)
 
 
 if __name__ == "__main__":
