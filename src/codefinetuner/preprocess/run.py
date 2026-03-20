@@ -44,11 +44,6 @@ def _setup_logger(log_level: str) -> None:
     logging.config.dictConfig(logger_config)
 
 
-def _normalize_extension(ext: str) -> str:
-    ext = ext.strip().lower()
-    return ext if ext.startswith(".") else f".{ext}"
-
-
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Preprocess code dataset for FIM fine-tuning.")
     parser.add_argument(
@@ -65,6 +60,7 @@ def _parse_args() -> argparse.Namespace:
         help="Logging level.",
     )
     return parser.parse_args()
+
 
 def _clear_existing_datasets(config: Config) -> None:
     for file in [config.train_dataset_path, config.eval_dataset_path, config.test_dataset_path]:
@@ -126,7 +122,7 @@ def main() -> None:
     user_args = _parse_args()
     preprocess_config = Config.load_from_yaml(user_args.config)
     _setup_logger(user_args.log_level)
-    run(config=preprocess_config)
+    run(preprocess_config)
 
 
 if __name__ == "__main__":

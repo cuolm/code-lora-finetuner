@@ -1,12 +1,16 @@
+import logging
 import math
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import tree_sitter as ts
 from omegaconf import OmegaConf, DictConfig, MISSING
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -55,12 +59,28 @@ class Config:
         if not yaml_path.exists():
             raise FileNotFoundError(f"Config file not found: {yaml_path}")
         
-        config_object = OmegaConf.structured(cls)
-        yaml_file_config = OmegaConf.load(yaml_path) 
-        yaml_preprocess_fields = yaml_file_config.preprocess
-        merged_config = OmegaConf.merge(config_object, yaml_preprocess_fields)
+        config_dict = OmegaConf.structured(cls)
+        try:
+            yaml_file_node = OmegaConf.load(yaml_path)
+        except Exception:
+            err_msg = f"Failed to load YAML config {yaml_path}" 
+            logger.exception(err_msg)
+            raise ValueError(err_msg)
+            
+        yaml_file_dict = OmegaConf.to_container(yaml_file_node, resolve=True)
+        yaml_preprocess_dict = yaml_file_dict.get("preprocess", {})
+
+        yaml_preprocess_valid_dict = {}
+        # Filter YAML fields to include only those defined in the Config dataclass.
+        # This prevents OmegaConf from raising an AttributeError when encountering 
+        # global YAML anchors or keys not present in the current Config dataclass. 
+        for field in fields(cls):
+            if field.name in yaml_preprocess_dict:
+                yaml_preprocess_valid_dict[field.name] = yaml_preprocess_dict[field.name]
+
+        merged_config_dict = OmegaConf.merge(config_dict, yaml_preprocess_valid_dict)
         
-        return OmegaConf.to_object(merged_config)
+        return OmegaConf.to_object(merged_config_dict)
 
     def __post_init__(self):
         self._validate_ratio()
