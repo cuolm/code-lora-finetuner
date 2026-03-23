@@ -48,7 +48,6 @@ class Config:
     collator_label_pad_token_id: int = -100
 
     # --- Logging and Evaluation Strategy ---
-    trainer_log_level: str = "info"
     trainer_logging_steps: int = 10  # average training loss over trainer_logging_steps period is calculated and logged
     trainer_eval_strategy: str = "steps"
     trainer_eval_steps: int = 100
@@ -81,15 +80,13 @@ class Config:
         if not yaml_path.exists():
             raise FileNotFoundError(f"Config file not found: {yaml_path}")
         
+        logger.info(f"Loading configuration from {yaml_path}") 
         config_dict = OmegaConf.structured(cls)
         try:
             yaml_file_node = OmegaConf.load(yaml_path)
-        except Exception:
-            err_msg = f"Failed to load YAML config {yaml_path}" 
-            logger.exception(err_msg)
-            raise ValueError(err_msg)
+        except Exception as e:
+            raise ValueError(f"Failed to load YAML config {yaml_path}") from e
 
-        yaml_file_node = OmegaConf.load(yaml_path) 
         yaml_file_dict = OmegaConf.to_container(yaml_file_node, resolve=True)
         yaml_finetune_dict = yaml_file_dict.get("finetune", {})
 
@@ -100,19 +97,19 @@ class Config:
         for field in fields(cls):
             if field.name in yaml_finetune_dict:
                 yaml_finetune_valid_dict[field.name] = yaml_finetune_dict[field.name]
+        logger.debug(f"Filtered YAML configuration: {yaml_finetune_valid_dict}")
 
         merged_config_dict = OmegaConf.merge(config_dict, yaml_finetune_valid_dict)
-        
         return OmegaConf.to_object(merged_config_dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self._setup_device_and_precision()
         self._setup_paths()
         self._ensure_output_paths_exist()
         self.dataset_train_dataset_length = self._get_dataset_length(self.train_dataset_path)
         self.trainer_max_steps = self._calculate_max_steps()
         
-    def _setup_device_and_precision(self):
+    def _setup_device_and_precision(self) -> None:
         if torch.cuda.is_available():
             self.device = "cuda"
             self.model_dtype = torch.bfloat16
@@ -122,8 +119,9 @@ class Config:
         else:
             self.device = "cpu"
             self.model_dtype = torch.float32
-
-    def _setup_paths(self):
+        logger.info(f"Execution environment: device={self.device}, dtype={self.model_dtype}")
+    
+    def _setup_paths(self) -> None:
         self.project_root_path = Path(__file__).resolve().parents[3]
         self.train_dataset_path = self.project_root_path / "outputs" / "preprocess" / "results" / "datasets" / "train_dataset.jsonl"
         self.eval_dataset_path = self.project_root_path / "outputs" / "preprocess" / "results" / "datasets" / "eval_dataset.jsonl"
@@ -134,6 +132,7 @@ class Config:
         self.trainer_plot_path = self.finetune_outputs_dir_path / "results" / "trainer_loss_plot.png"
         self.lora_adapter_path = self.finetune_outputs_dir_path / "results" / "lora_adapter"
         self.lora_model_path = self.finetune_outputs_dir_path / "results" / "lora_model"
+        logger.debug(f"Resolved project root: {self.project_root_path}")
     
     def _ensure_output_paths_exist(self) -> None:
         paths = [
@@ -146,7 +145,11 @@ class Config:
             self.lora_model_path
         ]
         for path in paths:
-            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.parent.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                logger.debug(f"Created parent directory: {path.parent}")
+            else:
+                logger.debug(f"Parent directory already exists: {path.parent}") 
 
     def _get_dataset_length(self, path: Path) -> int:
         """
@@ -154,14 +157,13 @@ class Config:
         We need to do this because we load it as a streaming dataset iterator, which can only be iterated once.
         """
         if not path.exists():
-            err_msg = f"Training dataset not found at expected path: {path}. Ensure the dataset file exists before initializing the Config."
-            logger.error(err_msg)
-            raise FileNotFoundError(err_msg)
+            raise FileNotFoundError( f"Training dataset not found at expected path: {path}. Ensure the dataset file exists before initializing the Config.")
+        count = 0
         with open(path, "r", encoding="utf-8") as file:
-            count = 0
             for _ in file:
                 count += 1
-            return count
+        logger.debug(f"Dataset length for '{path.name}': {count} lines")
+        return count
         
     def _calculate_max_steps(self) -> int:
         """
@@ -170,10 +172,14 @@ class Config:
         Instead, we need to calculate max_steps and pass it to the trainer.
         """
         if self.dataset_train_dataset_length == 0:
+            logger.warning("Dataset length is 0; max_steps will be 0.")
             return 0
             
         effective_batch_size = (self.trainer_per_device_train_batch_size * self.trainer_gradient_accumulation_steps)
+        if effective_batch_size == 0:
+            raise ValueError("Effective batch size (batch_size * grad_accum) cannot be zero.")
         steps_per_epoch = math.ceil(self.dataset_train_dataset_length / effective_batch_size)
         max_steps = steps_per_epoch * self.trainer_num_train_epochs
+        logger.debug(f"Calculated training schedule: {max_steps} total steps ({steps_per_epoch} steps/epoch for {self.trainer_num_train_epochs} epochs)")
         return max_steps
        

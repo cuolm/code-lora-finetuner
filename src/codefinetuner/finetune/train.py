@@ -81,7 +81,6 @@ def train_lora_model(
         max_steps=config.trainer_max_steps,
         lr_scheduler_type=config.trainer_lr_scheduler_type,
         warmup_steps=config.trainer_warmup_steps,
-        log_level=config.trainer_log_level,
         eval_strategy=config.trainer_eval_strategy,
         logging_steps=config.trainer_logging_steps,
         eval_steps=config.trainer_eval_steps,

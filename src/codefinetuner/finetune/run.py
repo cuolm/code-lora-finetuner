@@ -79,8 +79,7 @@ def _ensure_clean_checkpoint_dir(config: Config) -> None:
         checkpoints_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Cleared: {checkpoints_dir}")
     elif checkpoint and clear: 
-        logger.error("Configuration conflict: Cannot resume from a checkpoint while '--delete-all-checkpoints' is set.")
-        sys.exit(1)
+        raise RuntimeError("Configuration conflict: Cannot resume from a checkpoint while '--delete-all-checkpoints' is set.")
     else:
         logger.info(f"Starting fresh training. Existing checkpoints in {checkpoints_dir} are preserved.")
 
@@ -126,9 +125,12 @@ def run(config: Config) -> None:
 def main() -> None:
     user_args = _parse_args()
     _setup_logger(user_args.log_level)
-    finetune_config = Config.load_from_yaml(user_args.config)
-    run(finetune_config)
-
+    try:
+        finetune_config = Config.load_from_yaml(user_args.config)
+        run(finetune_config)
+    except Exception as e:
+        logger.exception(f"Finetuning failed")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

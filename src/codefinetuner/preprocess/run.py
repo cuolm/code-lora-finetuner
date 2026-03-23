@@ -1,5 +1,6 @@
 import argparse
 import logging.config
+import sys
 from pathlib import Path
 
 from transformers import AutoTokenizer
@@ -82,8 +83,7 @@ def _validate_and_configure_tokenizer(config: Config, tokenizer: AutoTokenizer):
         token_id = tokenizer.convert_tokens_to_ids(token)
         
         if token_id == tokenizer.unk_token_id or token_id is None:
-            logger.error(f"Token '{token}' defined in Config is missing from Tokenizer vocabulary.")
-            raise ValueError(f"Tokenizer mismatch: {token} not found.")
+            raise ValueError(f"Token '{token}' defined in Config is missing from Tokenizer vocabulary.")
 
     tokenizer.pad_token = config.fim_pad_token
     tokenizer.eos_token = config.eos_token
@@ -120,9 +120,13 @@ def run(config: Config) -> None:
 
 def main() -> None:
     user_args = _parse_args()
-    preprocess_config = Config.load_from_yaml(user_args.config)
     _setup_logger(user_args.log_level)
-    run(preprocess_config)
+    try:
+        preprocess_config = Config.load_from_yaml(user_args.config)
+        run(preprocess_config)
+    except Exception:
+        logger.exception(f"Preprocessing failed")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

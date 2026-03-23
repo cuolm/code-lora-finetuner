@@ -57,15 +57,13 @@ class Config:
     @classmethod
     def load_from_yaml(cls, yaml_path: Path) -> "Config":
         if not yaml_path.exists():
-            raise FileNotFoundError(f"Config file not found: {yaml_path}")
+            raise FileNotFoundError(f"Configuration file not found at: {yaml_path}")
         
         config_dict = OmegaConf.structured(cls)
         try:
             yaml_file_node = OmegaConf.load(yaml_path)
-        except Exception:
-            err_msg = f"Failed to load YAML config {yaml_path}" 
-            logger.exception(err_msg)
-            raise ValueError(err_msg)
+        except Exception as e:
+            raise ValueError(f"Failed to parse YAML file: {yaml_path}") from e
             
         yaml_file_dict = OmegaConf.to_container(yaml_file_node, resolve=True)
         yaml_preprocess_dict = yaml_file_dict.get("preprocess", {})
@@ -77,25 +75,27 @@ class Config:
         for field in fields(cls):
             if field.name in yaml_preprocess_dict:
                 yaml_preprocess_valid_dict[field.name] = yaml_preprocess_dict[field.name]
+        logger.debug(f"Filtered YAML configuration: {yaml_preprocess_valid_dict}")
 
         merged_config_dict = OmegaConf.merge(config_dict, yaml_preprocess_valid_dict)
         
         return OmegaConf.to_object(merged_config_dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self._validate_ratio()
         self._setup_paths()
         self._ensure_output_paths_exist()
         self._load_language_blocks()
         self._init_tree_sitter_parser()
         self.rng = np.random.default_rng(seed=self.rng_seed)
+        logger.debug("Config initialization complete.")
     
     def _validate_ratio(self):
         total_ratio = self.train_ratio + self.eval_ratio + self.test_ratio
         if not math.isclose(total_ratio, 1.0, rel_tol=1e-6):
             raise ValueError(f"Train + eval + test ratios must sum to 1.0, got {total_ratio}")
 
-    def _setup_paths(self):
+    def _setup_paths(self) -> None:
         self.project_root_path = Path(__file__).resolve().parents[3]
         if self.raw_data_path is None:
             self.raw_data_path = self.project_root_path / "data"
@@ -103,8 +103,9 @@ class Config:
         self.train_dataset_path = self.preprocess_outputs_dir_path / "results" / "datasets" / "train_dataset.jsonl"
         self.eval_dataset_path = self.preprocess_outputs_dir_path / "results" / "datasets" / "eval_dataset.jsonl"
         self.test_dataset_path = self.preprocess_outputs_dir_path / "results" / "datasets" / "test_dataset.jsonl"
+        logger.debug(f"Resolved project root: {self.project_root_path}")
 
-    def _ensure_output_paths_exist(self):
+    def _ensure_output_paths_exist(self) -> None:
         paths = [
             self.preprocess_outputs_dir_path,
             self.train_dataset_path,
@@ -113,7 +114,11 @@ class Config:
         ]
 
         for path in paths:
-            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.parent.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                logger.debug(f"Created parent directory: {path.parent}")
+            else:
+                logger.debug(f"Parent directory already exists: {path.parent}")  
  
     def _load_language_blocks(self) -> None:
         blocks_path = self.project_root_path / "config" / "language_block_definitions.json"
@@ -134,9 +139,11 @@ class Config:
 
     def _init_tree_sitter_parser(self) -> None:
         if self.tree_sitter_parser_path:
+            logger.info(f"Loading custom tree-sitter parser from {self.tree_sitter_parser_path}")
             from .extractor import get_custom_tree_sitter_parser
             self.tree_sitter_parser = get_custom_tree_sitter_parser(self.tree_sitter_parser_path, self.data_language)
         else:
+            logger.info(f"Loading tree-sitter language pack parser {self.data_language}")
             from .extractor import get_tree_sitter_language_pack_parser
             self.tree_sitter_parser = get_tree_sitter_language_pack_parser(self.data_language)
         

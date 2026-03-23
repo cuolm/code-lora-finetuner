@@ -14,9 +14,7 @@ logger = logging.getLogger(__name__)
 
 def get_custom_tree_sitter_parser(tree_sitter_lib_path: Path, data_language: str) -> ts.Parser:
     if not tree_sitter_lib_path.exists():
-        err_msg = f"Library not found: {tree_sitter_lib_path}"
-        logger.error(err_msg)
-        raise FileNotFoundError(err_msg)
+        raise FileNotFoundError(f"Library not found: {tree_sitter_lib_path}")
     try:
         lib = ctypes.CDLL(str(tree_sitter_lib_path)) # Load C Dynamic Link Library, makes all the public C functions inside the .dylib file available to be called from the Python script.
         entry_point_func_name = f"tree_sitter_{data_language}"
@@ -25,8 +23,7 @@ def get_custom_tree_sitter_parser(tree_sitter_lib_path: Path, data_language: str
         grammar_rules = ts.Language(lang_func()) # Call lang_func() function and wrap the returned raw C pointer into a tree-sitter Language object
         return ts.Parser(grammar_rules) 
     except (AttributeError, OSError) as e:
-        logger.exception(f"Failed to load custom tree sitter language parser: {e}")
-        raise
+        raise RuntimeError(f"Failed to load custom tree sitter language parser: {e}") from e
 
 
 def get_tree_sitter_language_pack_parser(data_language: str) -> ts.Parser:
