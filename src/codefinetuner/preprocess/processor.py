@@ -140,29 +140,6 @@ def _find_first_token_idx(sequence: List[int], token_id: int) -> int:
     return -1
 
 
-def _mask_labels(config: Config, input_ids: List[List[int]], tokenizer: AutoTokenizer) -> List[List[int]]:
-    fim_middle_token_id = tokenizer.convert_tokens_to_ids(config.fim_middle_token)
-    fim_pad_token_id = tokenizer.convert_tokens_to_ids(config.fim_pad_token)
-
-    labels = []
-
-    for idx, sequence in enumerate(input_ids):
-        sequence_labels = [-100] * len(sequence)  # initialize labels with -100 (pytorchignore index)
-
-        middle_token_idx = _find_first_token_idx(sequence, fim_middle_token_id)
-        if middle_token_idx == -1:
-            continue  # middle token not found, skip to next sequence
-
-        middle_start_idx = middle_token_idx + 1
-
-        # copy tokens after the middle token to labels
-        for j in range(middle_start_idx, len(sequence)):
-            sequence_labels[j] = sequence[j]
-        labels.append(sequence_labels)
-
-    return labels
-
-
 def _save_tokenized_batch_as_jsonl(file_path: Path, batch: Mapping[str, List[List[int]]]) -> None:
     with open(file_path, 'a', encoding='utf-8') as f:
         batch_size = len(batch['input_ids'])
@@ -192,7 +169,6 @@ def tokenize_and_save_fim_examples(config: Config, file_path: Path, fim_examples
                 return_tensors=None,
                 return_attention_mask=True
             )
-            # tokenized_batch["labels"] = _mask_labels(config, tokenized_batch["input_ids"], tokenizer)
             tokenized_batch["labels"] = tokenized_batch["input_ids"]
             _save_tokenized_batch_as_jsonl(file_path, tokenized_batch)
             batch = []
@@ -205,7 +181,6 @@ def tokenize_and_save_fim_examples(config: Config, file_path: Path, fim_examples
             return_tensors=None,
             return_attention_mask=True
         )
-        # tokenized_batch["labels"] = _mask_labels(config, tokenized_batch["input_ids"], tokenizer)
         tokenized_batch["labels"] = tokenized_batch["input_ids"]
         _save_tokenized_batch_as_jsonl(file_path, tokenized_batch)
 
