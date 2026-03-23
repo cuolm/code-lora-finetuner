@@ -7,6 +7,7 @@ globals: &globals
   fim_suffix_token: "<|fim_suffix|>"
   fim_pad_token: "<|fim_pad|>"
   eos_token: "<|endoftext|>"
+  label_pad_token_id: -100
   data_language: "c"
   data_extensions: [".c", ".h"]
 
@@ -56,7 +57,6 @@ finetune:
   trainer_logging_strategy: "steps"
   dataset_shuffle_buffer_size: 50000
   dataset_shuffle_seed: 0
-  collator_label_pad_token_id: -100
 
 # Evaluate stage - inherits globals + local params
 evaluate:

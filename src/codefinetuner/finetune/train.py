@@ -94,7 +94,7 @@ def train_lora_model(
 
     data_collator = FIMDataCollator(
         tokenizer=tokenizer,
-        label_pad_token_id=config.collator_label_pad_token_id
+        label_pad_token_id=config.label_pad_token_id
     )
     
     trainer = Trainer(

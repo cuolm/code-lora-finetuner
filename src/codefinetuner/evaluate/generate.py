@@ -112,7 +112,7 @@ def generate_and_save(config: Config, checkpoint_path: Path):
                 
                 perplexity_input_token_ids = benchmark_example["example_token_ids"]
                 perplexity_label_token_ids = perplexity_input_token_ids.copy()
-                perplexity_label_token_ids[:len(prompt_token_ids)] = [-100] * len(prompt_token_ids)  # mask labels all except ground truth reference middle tokens
+                perplexity_label_token_ids[:len(prompt_token_ids)] = [config.label_pad_token_id] * len(prompt_token_ids)  # mask labels all except ground truth reference middle tokens
 
                 lora_generated_middle_token_ids = _generate(config, lora_model, tokenizer, prompt_token_ids)
                 lora_perplexity = _get_fim_perplexity(config, lora_model, perplexity_input_token_ids, perplexity_label_token_ids)

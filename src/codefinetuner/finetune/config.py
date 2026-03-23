@@ -16,6 +16,7 @@ class Config:
 # --- Mandatory Parameters ---
     model_name: str = MISSING
     fim_pad_token: str = MISSING
+    label_pad_token_id: int = MISSING
 
     # --- Model Settings ---
     model_attn_implementation: str = "sdpa"  # sdpa = built-in PyTorch implementation of scaled dot product attention, imporves performance and memory efficiency
@@ -45,7 +46,6 @@ class Config:
     trainer_warmup_steps: int = 50
     trainer_gradient_checkpointing: bool = True  # saves memory by storing only key "checkpoint" activations and re-calculating intermediate ones during the backward pass
     trainer_max_steps: int = field(init=False)
-    collator_label_pad_token_id: int = -100
 
     # --- Logging and Evaluation Strategy ---
     trainer_logging_steps: int = 10  # average training loss over trainer_logging_steps period is calculated and logged

@@ -21,6 +21,7 @@ class Config:
     fim_middle_token: str = MISSING 
     fim_pad_token: str = MISSING 
     eos_token: str = MISSING 
+    label_pad_token_id: int = MISSING
 
     # --- Benchmark ---
     benchmark_sample_size: int = 4
