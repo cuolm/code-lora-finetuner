@@ -121,7 +121,7 @@ class Config:
                 logger.debug(f"Parent directory already exists: {path.parent}")  
  
     def _load_language_blocks(self) -> None:
-        blocks_path = self.project_root_path / "config" / "language_block_definitions.json"
+        blocks_path = self.project_root_path / "config" / "tree_sitter_definitions.json"
         with open(blocks_path, "r", encoding="utf-8") as f:
             language_data = json.load(f)
 
